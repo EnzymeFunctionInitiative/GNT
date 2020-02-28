@@ -56,7 +56,7 @@ my ($ssnin, $neighborhoodSize, $warningFile, $gnn, $ssnout, $cooccurrence, $stat
     $uniprotIdDir, $uniprotDomainIdDir, $uniref50IdDir, $uniref90IdDir, $uniref50DomainIdDir, $uniref90DomainIdDir,
     $pfamCoocTable, $hubCountFile, $allPfamDir, $splitPfamDir, $allSplitPfamDir, $clusterSizeFile, $swissprotClustersDescFile,
     $swissprotSinglesDescFile, $parentDir, $renumberClusters, $disableCache, $skipIdMapping, $skipOrganism, $debug,
-    $outputDir, $includeFragments,
+    $outputDir, $excludeFragments,
 );
 
 my $result = GetOptions(
@@ -95,7 +95,7 @@ my $result = GetOptions(
     "disable-cache"         => \$disableCache,
     "skip-id-mapping"       => \$skipIdMapping,
     "skip-organism"         => \$skipOrganism,
-    "include-fragments"     => \$includeFragments,
+    "exclude-fragments"     => \$excludeFragments,
     "debug"                 => \$debug,
 );
 
@@ -589,7 +589,7 @@ sub getClusterToIdMapping {
             (my $proteinId = $id) =~ s/:\d+:\d+$//;
             if ($ssnSeqSource) {
                 my $sql = "SELECT * FROM uniref WHERE accession = '$proteinId'";
-                if (not $includeFragments) {
+                if ($excludeFragments) {
                     $sql = "SELECT U.* FROM uniref AS U LEFT JOIN annotations AS A ON U.accession = A.accession WHERE U.accession = '$proteinId' AND A.Fragment = 0";
                 }
                 my $sth = $dbh->prepare($sql);
@@ -601,7 +601,7 @@ sub getClusterToIdMapping {
             }
             
             my $addSeq = 1;
-            if (not $includeFragments) {
+            if ($excludeFragments) {
                 $addSeq = 1;
                 my $sql = "SELECT Fragment FROM annotations WHERE accession = '$proteinId' AND Fragment = 0";
                 my $sth = $dbh->prepare($sql);
@@ -814,7 +814,7 @@ sub defaultParameters {
     $pfamCoocTable = "" if not $pfamCoocTable;
     $hubCountFile = "" if not $hubCountFile;
 
-    $includeFragments = defined($includeFragments);
+    $excludeFragments = defined($excludeFragments);
 }
 
 

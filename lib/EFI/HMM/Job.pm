@@ -34,6 +34,8 @@ sub makeJob {
         }
     }
 
+    my $maxMsaSeq = int($info->{hmm_max_seq_msa} // 0);
+
     my $fastaDir = $info->{fasta_data_dir};
     $fastaDir = $info->{fasta_uniref90_data_dir} if $info->{fasta_uniref90_data_dir};
     $fastaDir = $info->{fasta_uniref50_data_dir} if $info->{fasta_uniref50_data_dir};
@@ -50,6 +52,10 @@ sub makeJob {
     my $domClusterListFile = "$domOutDir/cluster_list_min_seq.txt";
     my $fullCountFile = "$fullOutDir/cluster_node_counts.txt";
     my $domCountFile = "$domOutDir/cluster_node_counts.txt";
+    
+    my $zipPrefix = $info->{hmm_zip_prefix};
+
+    my $zipFiles = {};
 
     my $np = $info->{num_tasks} ? $info->{num_tasks} : 1;
     my $B = $SS->getBuilder();
@@ -98,11 +104,32 @@ SCRIPT
             );
         }
 
+        my $zipFilename= "${zipPrefix}_MSAs_Full.zip";
+        my $zipFile = "$info->{output_path}/$zipFilename";
         $B->addAction(<<SCRIPT
 
     #MAKE MULTIPLE SEQUENCE ALIGNMENTs FOR FULL SEQUENCES
-    cat $fullClusterListFile | xargs -P $np -I % muscle -quiet -in $fastaDir/cluster_%.fasta -out $fullAlignDir/cluster_%.afa
+SCRIPT
+        );
+        if ($maxMsaSeq) {
+            my $localFastaDir = "$fullOutDir/fasta-fraction";
+            $B->addAction(<<SCRIPT
+    mkdir -p $localFastaDir
+    cat $fullClusterListFile | xargs -P $np -I % $appDir/subset_fasta.pl --fasta-in $fastaDir/cluster_%.fasta --fasta-out $localFastaDir/cluster_%_subset${maxMsaSeq}.fasta --max-seq $maxMsaSeq
+    cat $fullClusterListFile | xargs -P $np -I % bash -c "muscle -quiet -in $localFastaDir/cluster_%_subset${maxMsaSeq}.fasta -out $fullAlignDir/cluster_%.afa || true"
+SCRIPT
+            );
+        } else {
+            $B->addAction(<<SCRIPT
+    cat $fullClusterListFile | xargs -P $np -I % bash -c "muscle -quiet -in $fastaDir/cluster_%.fasta -out $fullAlignDir/cluster_%.afa || true"
+SCRIPT
+            );
+        }
+        $B->addAction(<<SCRIPT
     find $fullAlignDir -name 'cluster_*.afa' -type f | sed 's%$fullAlignDir/\\(cluster_\\([0-9]\\+\\)\\)\\.afa%\\2\\tfull\\tnormal\\t$info->{hmm_rel_path}/full/normal/align/\\1.afa%g' > $alignListFile
+    DIR=`pwd`
+    cd $fullAlignDir && zip -r $zipFile . -i '*'
+    cd \$DIR
 
 SCRIPT
         );
@@ -110,29 +137,34 @@ SCRIPT
 
     ########## FULL - HMM
     if ($info->{hmm_option} =~ m/HMM/i) {
-        my $hmmZipFilename = "$info->{hmm_zip_prefix}_HMMs_Full.zip";
-        my $hmmZip = "$info->{output_path}/$hmmZipFilename";
+        my $zipFilename = "${zipPrefix}_HMMs_Full.zip";
+        my $zipFile = "$info->{output_path}/$zipFilename";
         $B->addAction(<<SCRIPT
     mkdir -p $fullOutDir/hmm
     cat $fullClusterListFile | xargs -P $np -I % hmmbuild $fullOutDir/hmm/cluster_%.hmm $fullAlignDir/cluster_%.afa
     cat $fullClusterListFile | xargs -P $np -I % $appDir/make_skylign_logo.pl --hmm $fullOutDir/hmm/cluster_%.hmm --json $fullOutDir/hmm/cluster_%.json --png $fullOutDir/hmm/cluster_%.png
     find $fullOutDir/hmm -name 'cluster_*.hmm' -type f | sed 's%$fullOutDir/hmm/\\(cluster_\\([0-9]\\+\\)\\)\\.hmm%\\2\\tfull\\tnormal\\t$info->{hmm_rel_path}/full/normal/hmm/\\1%g' > $logoListFile
     DIR=`pwd`
-    cd $fullOutDir/hmm && zip -r $hmmZip . -i '*'
+    cd $fullOutDir/hmm && zip -r $zipFile . -i '*'
     cd \$DIR
 
 SCRIPT
         );
-        #print $logoListFh join("\t", $clusterNum, $seqTypeLabel, $opt->[0], "$relHmmDir/$opt->[0]/$filename"), "\n";
+        $zipFiles->{"hmm"}->{"full"} = $zipFile;
     }
 
     ########## FULL - CONSENSUS RESIDUE OR WEBLOGO
     if ($info->{hmm_option} =~ m/CR|WEBLOGO/i) {
+        my $zipFilename= "${zipPrefix}_WebLogos_Full.zip";
+        my $zipFile = "$info->{output_path}/$zipFilename";
         $B->addAction(<<SCRIPT
     mkdir -p $fullOutDir/weblogo
     cat $fullClusterListFile | xargs -P $np -I % weblogo -D fasta -F png --resolution 300 --stacks-per-line 80 -f $fullAlignDir/cluster_%.afa -o $fullOutDir/weblogo/cluster_%.png $colorList
     cat $fullClusterListFile | xargs -P $np -I % weblogo -D fasta -F logodata -f $fullAlignDir/cluster_%.afa -o $fullOutDir/weblogo/cluster_%.txt
     find $fullOutDir/weblogo -name 'cluster_*.png' -type f | sed 's%$fullOutDir/weblogo/\\(cluster_\\([0-9]\\+\\)\\)\\.png%\\2\\tfull\\tnormal\\t$info->{hmm_rel_path}/full/normal/weblogo/\\1%g' > $weblogoListFile
+    DIR=`pwd`
+    cd $fullOutDir/weblogo && zip -r $zipFile . -i '*.png'
+    cd \$DIR
 
 SCRIPT
         );
@@ -142,7 +174,7 @@ SCRIPT
     if ($info->{hmm_option} =~ m/CR/i) {
         foreach my $aa (@aas) {
             my $consDir = "$fullOutDir/consensus_residue_results_$aa";
-            my $consZipName = "$info->{hmm_zip_prefix}_ConsensusResidue_${aa}_Full.zip";
+            my $consZipName = "${zipPrefix}_ConsensusResidue_${aa}_Full.zip";
             my $consZip = "$info->{output_path}/$consZipName";
             $B->addAction("    mkdir -p $consDir");
             my $mergeCounts = "";
@@ -160,7 +192,7 @@ SCRIPT
                 $mergeCounts .= " --position-file $ct=$consDir/${baseFile}_position.txt";
                 $mergePercent .= " --percentage-file $ct=$consDir/${baseFile}_percentage.txt";
             }
-            my $outBaseName = "$info->{hmm_zip_prefix}_ConsensusResidue_${aa}";
+            my $outBaseName = "${zipPrefix}_ConsensusResidue_${aa}";
             my $posSumFileName = "${outBaseName}_Position_Summary_Full.txt";
             my $pctSumFileName = "${outBaseName}_Percentage_Summary_Full.txt";
             $B->addAction(<<SCRIPT
@@ -179,15 +211,22 @@ SCRIPT
 
     ########## FULL - LENGTH HISTOGRAM
     if ($info->{hmm_option} =~ m/HIST/i) {
+        my $zipFilename= "${zipPrefix}_LenHist_UniProt_Full.zip";
+        my $zipFile = "$info->{output_path}/$zipFilename";
         my $outDir = "$fullOutDir/hist-uniprot";
         $B->addAction(<<SCRIPT
     mkdir -p $outDir
     find $fastaDir -name 'cluster_*.fasta' -type f -print0 | sed 's%$fastaDir/\\([a-z_0-9]\\+\\)\\.fasta%\\1%g' | xargs -P $np -0 -I % $appDir/make_length_histo.pl -seq-file $info->{fasta_data_dir}/%.fasta -histo-file $outDir/%.txt
     find $outDir -name '*.txt' -type f -not -empty -print0 | sed 's%\\($outDir/[a-z_0-9]\\+\\)\\.txt%\\1%g' | xargs -P $np -0 -I % Rscript $appDir/hist-length.r legacy %.txt %.png 0 'Full-UniProt' 700 315
     find $outDir -name '*.png' | sed 's%$outDir/\\(cluster_\\(domain\\)\\?_\\?\\([0-9]\\+\\)\\)\\.png%\\3\\tfull\\tuniprot\\t$info->{hmm_rel_path}/full/normal/hist-uniprot/\\1%g' >> $histListFile
+    DIR=`pwd`
+    cd $outDir && zip -r $zipFile . -i '*.png'
+    cd \$DIR
 SCRIPT
         );
         if ($info->{fasta_uniref90_data_dir}) {
+            my $zipFilename= "${zipPrefix}_LenHist_UniRef90_Full.zip";
+            my $zipFile = "$info->{output_path}/$zipFilename";
             my $urType = "90";
             my $outDir = "$fullOutDir/hist-uniref$urType";
             $B->addAction(<<SCRIPT
@@ -195,10 +234,15 @@ SCRIPT
     find $info->{fasta_uniref90_data_dir} -name 'cluster_*.fasta' -type f -print0 | sed 's%$info->{fasta_uniref90_data_dir}/\\([a-z_0-9]\\+\\)\\.fasta%\\1%g' | xargs -P $np -0 -I % $appDir/make_length_histo.pl -seq-file $info->{fasta_uniref90_data_dir}/%.fasta -histo-file $outDir/%.txt
     find $outDir -name '*.txt' -type f -not -empty -print0 | sed 's%\\($outDir/[a-z_0-9]\\+\\)\\.txt%\\1%g' | xargs -P $np -0 -I % Rscript $appDir/hist-length.r legacy %.txt %.png 0 'Full-UniRef90' 700 315
     find $outDir -name '*.png' | sed 's%$outDir/\\(cluster_\\(domain\\)\\?_\\?\\([0-9]\\+\\)\\)\\.png%\\3\\tfull\\tuniref90\\t$info->{hmm_rel_path}/full/normal/hist-uniref90/\\1%g' >> $histListFile
+    DIR=`pwd`
+    cd $outDir && zip -r $zipFile . -i '*.png'
+    cd \$DIR
 SCRIPT
             );
         }
         if ($info->{fasta_uniref50_data_dir}) {
+            my $zipFilename= "${zipPrefix}_LenHist_UniRef50_Full.zip";
+            my $zipFile = "$info->{output_path}/$zipFilename";
             my $urType = "50";
             my $outDir = "$fullOutDir/hist-uniref$urType";
             $B->addAction(<<SCRIPT
@@ -206,6 +250,9 @@ SCRIPT
     find $info->{fasta_uniref50_data_dir} -name 'cluster_*.fasta' -type f -print0 | sed 's%$info->{fasta_uniref50_data_dir}/\\([a-z_0-9]\\+\\)\\.fasta%\\1%g' | xargs -P $np -0 -I % $appDir/make_length_histo.pl -seq-file $info->{fasta_uniref50_data_dir}/%.fasta -histo-file $outDir/%.txt
     find $outDir -name '*.txt' -type f -not -empty -print0 | sed 's%\\($outDir/[a-z_0-9]\\+\\)\\.txt%\\1%g' | xargs -P $np -0 -I % Rscript $appDir/hist-length.r legacy %.txt %.png 0 'Full-UniRef50' 700 315
     find $outDir -name '*.png' | sed 's%$outDir/\\(cluster_\\(domain\\)\\?_\\?\\([0-9]\\+\\)\\)\\.png%\\3\\tfull\\tuniref50\\t$info->{hmm_rel_path}/full/normal/hist-uniref50/\\1%g' >> $histListFile
+    DIR=`pwd`
+    cd $outDir && zip -r $zipFile . -i '*.png'
+    cd \$DIR
 SCRIPT
             );
         }
@@ -237,6 +284,8 @@ SCRIPT
 
     ########## DOMAIN - MSA
     if ($info->{hmm_option} =~ m/HMM|CR|WEBLOGO/) {
+        my $msaZipFilename = "${zipPrefix}_WebLogos_Full.zip";
+        my $msaZip = "$info->{output_path}/$msaZipFilename";
         $B->addAction(<<SCRIPT
     mkdir -p $domAlignDir
     $appDir/get_cluster_count.pl --fasta-dir $fastaDomainDir --count-file $domCountFile
@@ -260,11 +309,32 @@ SCRIPT
             );
         }
 
+        my $zipFilename= "${zipPrefix}_MSAs_Domain.zip";
+        my $zipFile = "$info->{output_path}/$zipFilename";
         $B->addAction(<<SCRIPT
 
     #MAKE MULTIPLE SEQUENCE ALIGNMENTs FOR DOMAIN SEQUENCES
-    cat $domClusterListFile | xargs -P $np -I % muscle -quiet -in $fastaDomainDir/cluster_domain_%.fasta -out $domAlignDir/cluster_domain_%.afa
+SCRIPT
+        );
+        if ($maxMsaSeq) {
+            my $localFastaDir = "$domOutDir/fasta-fraction";
+            $B->addAction(<<SCRIPT
+    mkdir -p $localFastaDir
+    cat $fullClusterListFile | xargs -P $np -I % $appDir/subset_fasta.pl --fasta-in $fastaDomainDir/cluster_domain_%.fasta --fasta-out $localFastaDir/cluster_domain_%_subset${maxMsaSeq}.fasta --max-seq $maxMsaSeq
+    cat $domClusterListFile | xargs -P $np -I % bash -c "muscle -quiet -in $localFastaDir/cluster_domain_%_subset${maxMsaSeq}.fasta -out $domAlignDir/cluster_domain_%.afa || true"
+SCRIPT
+            );
+        } else {
+            $B->addAction(<<SCRIPT
+    cat $domClusterListFile | xargs -P $np -I % bash -c "muscle -quiet -in $fastaDomainDir/cluster_domain_%.fasta -out $domAlignDir/cluster_domain_%.afa || true"
+SCRIPT
+            );
+        }
+        $B->addAction(<<SCRIPT
     find $domAlignDir -name 'cluster_*.afa' -type f | sed 's%$domAlignDir/\\(cluster_domain_\\([0-9]\\+\\)\\)\\.afa%\\2\\tdomain\\tnormal\\t$info->{hmm_rel_path}/domain/align/\\1.afa%g' >> $alignListFile
+    DIR=`pwd`
+    cd $domAlignDir && zip -r $zipFile . -i '*'
+    cd \$DIR
 
 SCRIPT
         );
@@ -272,12 +342,17 @@ SCRIPT
 
     ########## DOMAIN - CONSENSUS RESIDUE OR WEBLOGO
     if ($info->{hmm_option} =~ m/CR|WEBLOGO/i) {
+        my $zipFilename= "${zipPrefix}_WebLogos_Domain.zip";
+        my $zipFile = "$info->{output_path}/$zipFilename";
         $B->addAction(<<SCRIPT
     #MAKE WEBLOGOs
     mkdir -p $domOutDir/weblogo
     cat $domClusterListFile | xargs -P $np -I % weblogo -D fasta -F png --resolution 300 --stacks-per-line 80 -f $domAlignDir/cluster_domain_%.afa -o $domOutDir/weblogo/cluster_domain_%.png $colorList
     cat $domClusterListFile | xargs -P $np -I % weblogo -D fasta -F logodata -f $domAlignDir/cluster_domain_%.afa -o $domOutDir/weblogo/cluster_domain_%.txt
     find $domOutDir/weblogo -name 'cluster_*.png' -type f | sed 's%$domOutDir/weblogo/\\(cluster_\\(domain\\)\\?_\\?\\([0-9]\\+\\)\\)\\.png%\\3\\t\\2\\tnormal\\t$info->{hmm_rel_path}/domain/weblogo/\\1%g' >> $weblogoListFile
+    DIR=`pwd`
+    cd $domOutDir/weblogo && zip -r $zipFile . -i '*.png'
+    cd \$DIR
 
 SCRIPT
         );
@@ -285,8 +360,8 @@ SCRIPT
 
     ########## DOMAIN - HMM
     if ($info->{hmm_option} =~ m/HMM/i) {
-        my $hmmZipFilename = "$info->{hmm_zip_prefix}_HMMs_Domain.zip";
-        my $hmmZip = "$info->{output_path}/$hmmZipFilename";
+        my $zipFilename = "${zipPrefix}_HMMs_Domain.zip";
+        my $zipFile = "$info->{output_path}/$zipFilename";
         foreach my $type (@types) {
             my $typeDir = "$domOutDir/hmm";
             $B->addAction(<<SCRIPT
@@ -296,7 +371,7 @@ SCRIPT
     cat $domClusterListFile | xargs -P $np -I % $appDir/make_skylign_logo.pl --hmm $typeDir/cluster_domain_%.hmm --json $typeDir/cluster_domain_%.json --png $typeDir/cluster_domain_%.png
     find $typeDir -name 'cluster_*.hmm' -type f | sed 's%$typeDir/\\(cluster_\\(domain\\)\\?_\\?\\([0-9]\\+\\)\\)\\.hmm%\\3\\t\\2\\t$type\\t$info->{hmm_rel_path}/domain/hmm/\\1%g' >> $logoListFile
     DIR=`pwd`
-    cd $domOutDir/hmm && zip -r $hmmZip . -i '*'
+    cd $domOutDir/hmm && zip -r $zipFile . -i '*'
     cd \$DIR
 
 SCRIPT
@@ -308,7 +383,7 @@ SCRIPT
     if ($info->{hmm_option} =~ m/CR/i) {
         foreach my $aa (@aas) {
             my $consDir = "$domOutDir/consensus_residue_results_$aa";
-            my $consZipName = "$info->{hmm_zip_prefix}_ConsensusResidue_${aa}_Domain.zip";
+            my $consZipName = "${zipPrefix}_ConsensusResidue_${aa}_Domain.zip";
             my $consZip = "$info->{output_path}/$consZipName";
             $B->addAction("    mkdir -p $consDir");
             my $mergeCounts = "";
@@ -326,7 +401,7 @@ SCRIPT
                 $mergeCounts .= " --position-file $ct=$consDir/${baseFile}_position.txt";
                 $mergePercent .= " --percentage-file $ct=$consDir/${baseFile}_percentage.txt";
             }
-            my $outBaseName = "$info->{hmm_zip_prefix}_ConsensusResidue_${aa}";
+            my $outBaseName = "${zipPrefix}_ConsensusResidue_${aa}";
             my $posSumFileName = "${outBaseName}_Position_Summary_Domain.txt";
             my $pctSumFileName = "${outBaseName}_Percentage_Summary_Domain.txt";
             $B->addAction(<<SCRIPT
@@ -346,15 +421,22 @@ SCRIPT
     ########## DOMAIN - LENGTH HISTOGRAM
     if ($info->{hmm_option} =~ m/HIST/i) {
         if ($info->{fasta_domain_data_dir}) {
+            my $zipFilename= "${zipPrefix}_LenHist_UniProt_Domain.zip";
+            my $zipFile = "$info->{output_path}/$zipFilename";
             my $outDir = "$domOutDir/hist-uniprot";
             $B->addAction(<<SCRIPT
     mkdir -p $outDir
     find $info->{fasta_domain_data_dir} -name 'cluster_*.fasta' -type f -print0 | sed 's%$info->{fasta_domain_data_dir}/\\([a-z_0-9]\\+\\)\\.fasta%\\1%g' | xargs -P $np -0 -I % $appDir/make_length_histo.pl -seq-file $info->{fasta_domain_data_dir}/%.fasta -histo-file $outDir/%.txt
     find $outDir -name '*.txt' -type f -not -empty -print0 | sed 's%\\($outDir/[a-z_0-9]\\+\\)\\.txt%\\1%g' | xargs -P $np -0 -I % Rscript $appDir/hist-length.r legacy %.txt %.png 0 'Domain-UniProt' 700 315
     find $outDir -name '*.png' | sed 's%$outDir/\\(cluster_\\(domain\\)\\?_\\?\\([0-9]\\+\\)\\)\\.png%\\3\\tdomain\\tuniprot\\t$info->{hmm_rel_path}/domain/hist-uniprot/\\1%g' >> $histListFile
+    DIR=`pwd`
+    cd $outDir && zip -r $zipFile . -i '*.png'
+    cd \$DIR
 SCRIPT
             );
         } elsif ($info->{fasta_uniref90_domain_data_dir}) {
+            my $zipFilename= "${zipPrefix}_LenHist_UniRef90_Domain.zip";
+            my $zipFile = "$info->{output_path}/$zipFilename";
             my $urType = "90";
             my $outDir = "$domOutDir/hist-uniref$urType";
             $B->addAction(<<SCRIPT
@@ -362,9 +444,14 @@ SCRIPT
     find $info->{fasta_uniref90_domain_data_dir} -name 'cluster_*.fasta' -type f -print0 | sed 's%$info->{fasta_uniref90_domain_data_dir}/\\([a-z_0-9]\\+\\)\\.fasta%\\1%g' | xargs -P $np -0 -I % $appDir/make_length_histo.pl -seq-file $info->{fasta_uniref90_domain_data_dir}/%.fasta -histo-file $outDir/%.txt
     find $outDir -name '*.txt' -type f -not -empty -print0 | sed 's%\\($outDir/[a-z_0-9]\\+\\)\\.txt%\\1%g' | xargs -P $np -0 -I % Rscript $appDir/hist-length.r legacy %.txt %.png 0 'Domain-UniRef90' 700 315
     find $outDir -name '*.png' | sed 's%$outDir/\\(cluster_\\(domain\\)\\?_\\?\\([0-9]\\+\\)\\)\\.png%\\3\\tdomain\\tuniref90\\t$info->{hmm_rel_path}/domain/hist-uniref90/\\1%g' >> $histListFile
+    DIR=`pwd`
+    cd $outDir && zip -r $zipFile . -i '*.png'
+    cd \$DIR
 SCRIPT
             );
         } elsif ($info->{fasta_uniref50_domain_data_dir}) {
+            my $zipFilename= "${zipPrefix}_LenHist_UniRef50_Domain.zip";
+            my $zipFile = "$info->{output_path}/$zipFilename";
             my $urType = "50";
             my $outDir = "$domOutDir/hist-uniref$urType";
             $B->addAction(<<SCRIPT
@@ -372,6 +459,9 @@ SCRIPT
     find $info->{fasta_uniref50_domain_data_dir} -name 'cluster_*.fasta' -type f -print0 | sed 's%$info->{fasta_uniref50_domain_data_dir}/\\([a-z_0-9]\\+\\)\\.fasta%\\1%g' | xargs -P $np -0 -I % $appDir/make_length_histo.pl -seq-file $info->{fasta_uniref50_domain_data_dir}/%.fasta -histo-file $outDir/%.txt
     find $outDir -name '*.txt' -type f -not -empty -print0 | sed 's%\\($outDir/[a-z_0-9]\\+\\)\\.txt%\\1%g' | xargs -P $np -0 -I % Rscript $appDir/hist-length.r legacy %.txt %.png 0 'Domain-UniRef50' 700 315
     find $outDir -name '*.png' | sed 's%$outDir/\\(cluster_\\(domain\\)\\?_\\?\\([0-9]\\+\\)\\)\\.png%\\3\\tdomain\\tuniref50\\t$info->{hmm_rel_path}/domain/hist-uniref50/\\1%g' >> $histListFile
+    DIR=`pwd`
+    cd $outDir && zip -r $zipFile . -i '*.png'
+    cd \$DIR
 SCRIPT
             );
         }

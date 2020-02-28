@@ -23,7 +23,7 @@ use EFI::HMM::Job;
 my ($ssnIn, $nbSize, $ssnOut, $cooc, $outputDir, $scheduler, $dryRun, $queue, $jobId);
 my ($statsFile, $clusterSizeFile, $swissprotClustersDescFile, $swissprotSinglesDescFile);
 my ($jobConfigFile, $domainMapFileName, $mapFileName, $extraRam);
-my ($optMsaOption, $optAaThreshold, $optAaList, $optMinSeqMsa);
+my ($optMsaOption, $optAaThreshold, $optAaList, $optMinSeqMsa, $optMaxSeqMsa);
 my $result = GetOptions(
     "ssn-in=s"                  => \$ssnIn,
     "ssn-out=s"                 => \$ssnOut,
@@ -44,6 +44,7 @@ my $result = GetOptions(
     "opt-aa-threshold=s"        => \$optAaThreshold,
     "opt-aa-list=s"             => \$optAaList,
     "opt-min-seq-msa=s"         => \$optMinSeqMsa,
+    "opt-max-seq-msa=s"         => \$optMaxSeqMsa,
 );
 
 my $usage = <<USAGE
@@ -289,6 +290,7 @@ if ($optMsaOption) {
     $fileInfo->{hmm_amino_acids} = [split(m/,/, $optAaList)];
     my @colors = ("red", "blue", "orange", "DarkGreen", "Magenta", "Gray");
     $fileInfo->{hmm_weblogo_colors} = \@colors;
+    $fileInfo->{hmm_max_seq_msa} = $optMaxSeqMsa // 0;
 
     $optMinSeqMsa = ($optMinSeqMsa and $optMinSeqMsa >= 1) ? $optMinSeqMsa : 5;
     $fileInfo->{hmm_min_seq_msa} = $optMinSeqMsa;

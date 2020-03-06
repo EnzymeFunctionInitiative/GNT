@@ -21,7 +21,7 @@ use EFI::HMM::Job;
 
 
 my ($ssnIn, $nbSize, $ssnOut, $cooc, $outputDir, $scheduler, $dryRun, $queue, $jobId);
-my ($statsFile, $clusterSizeFile, $swissprotClustersDescFile, $swissprotSinglesDescFile);
+my ($statsFile, $clusterSizeFile, $clusterNumMapFile, $swissprotClustersDescFile, $swissprotSinglesDescFile);
 my ($jobConfigFile, $domainMapFileName, $mapFileName, $extraRam);
 my ($optMsaOption, $optAaThreshold, $optAaList, $optMinSeqMsa, $optMaxSeqMsa);
 my $result = GetOptions(
@@ -36,6 +36,7 @@ my $result = GetOptions(
     "domain-map-file-name=s"    => \$domainMapFileName,
     "stats=s"                   => \$statsFile,
     "cluster-sizes=s"           => \$clusterSizeFile,
+    "cluster-num-map=s"         => \$clusterNumMapFile,
     "sp-clusters-desc=s"        => \$swissprotClustersDescFile,
     "sp-singletons-desc=s"      => \$swissprotSinglesDescFile,
     "job-config=s"              => \$jobConfigFile,
@@ -126,6 +127,7 @@ $domainMapFileName          = "domain_mapping_table.txt"        if not $domainMa
 $jobId                      = ""                                if not $jobId;
 $statsFile                  = "stats.txt"                       if not $statsFile;
 $clusterSizeFile            = "cluster_sizes.txt"               if not $clusterSizeFile;
+$clusterNumMapFile          = "cluster_num_map.txt"             if not $clusterNumMapFile;
 $swissprotClustersDescFile  = "swissprot_clusters_desc.txt"     if not $swissprotClustersDescFile;
 $swissprotSinglesDescFile   = "swissprot_singletons_desc.txt"   if not $swissprotSinglesDescFile;
 
@@ -317,6 +319,7 @@ my $scriptArgs =
     " -config $configFile" .
     " -stats \"$statsFile\"" .
     " -cluster-sizes \"$clusterSizeFile\"" .
+    " -cluster-num-map \"$clusterNumMapFile\"" .
     " -sp-clusters-desc \"$swissprotClustersDescFile\"" .
     " -sp-singletons-desc \"$swissprotSinglesDescFile\"" .
     ""

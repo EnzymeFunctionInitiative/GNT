@@ -19,10 +19,10 @@ use constant ALL_IDS => 1;          # Flag to indicate to return all IDs, not ju
 use constant METANODE_IDS => 2;     # Flag to indicate to return the list of IDs that match the visible nodes in the network
 use constant NO_DOMAIN => 4;        # Flag to indicate to return IDs stripped of domain info
 use constant INTERNAL => 8;         # Internal cluster ID, not cluster number
-
+use constant CLUSTER_MAPPING => 16; # Flag to request an arrayref of arrayrefs in getClusterNumbers
 
 use Exporter 'import';
-our @EXPORT = qw(median writeGnnField writeGnnListField ALL_IDS METANODE_IDS NO_DOMAIN INTERNAL);
+our @EXPORT = qw(median writeGnnField writeGnnListField ALL_IDS METANODE_IDS NO_DOMAIN INTERNAL CLUSTER_MAPPING);
 
 
 
@@ -326,8 +326,10 @@ sub numberClusters {
             $c }
         @supernodeKeys;
     my @clusterIdsByNodeCount = sort {
-            my $as = scalar @{$self->getIdsInCluster($a, METANODE_IDS|INTERNAL)};
-            my $bs = scalar @{$self->getIdsInCluster($b, METANODE_IDS|INTERNAL)};
+            my $aref = $self->getIdsInCluster($a, METANODE_IDS|INTERNAL);
+            my $bref = $self->getIdsInCluster($b, METANODE_IDS|INTERNAL);
+            my $as = $aref ? scalar @$aref : 0;
+            my $bs = $bref ? scalar @$bref : 0;
             my $c = $bs <=> $as;
             $c = $a <=> $b if not $c; # handle equals case
             $c }
@@ -375,8 +377,14 @@ sub hasExistingNumber {
 
 sub getClusterNumbers {
     my $self = shift;
+    my $flag = shift || 0;
 
-    return sort { $a <=> $b } keys %{$self->{network}->{cluster_num_map}};
+    my @idNums = sort { $a <=> $b } keys %{$self->{network}->{cluster_num_map}};
+    if ($flag & CLUSTER_MAPPING) {
+        return map { [$_, $self->{network}->{cluster_node_num_map}->{$self->{network}->{cluster_num_map}->{$_}}] } @idNums;
+    } else {
+        return @idNums;
+    }
 }
 
 # Dangerous. Used only in a sort function in cluster_gnn.pl
@@ -394,7 +402,6 @@ sub getClusterNumber {
     my $key = $flag == METANODE_IDS ? "cluster_node_num_map" : "cluster_id_map";
     return "" if not exists $self->{network}->{$key}->{$clusterId};
     my $num = $self->{network}->{$key}->{$clusterId};
-    print "$clusterId\t$num\t$key\n";
     return $num;
 }
 

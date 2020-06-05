@@ -521,6 +521,8 @@ sub saveGnnAttributes {
         $self->{anno}->{ACC}->{display} => 1,
     );
 
+    print Dumper($gnnData->{noNeighborMap});
+
     # If this is a repnode network, there will be a child node named "ACC". If so, we need to wrap
     # all of the no matches, etc into a list rather than a simple attribute.
     my @accIdNode = grep { $_ =~ /\S/ and $_->nodeName eq "att" and exists $expandFields{$_->getAttribute('name')} } $node->getChildNodes;
@@ -563,7 +565,7 @@ sub saveGnnAttributes {
         writeGnnListField($writer, 'Neighbor InterPro Families', 'string', \@nbIproFams, "");
     } else {
         (my $nodeId = $node->getAttribute('label')) =~ s/:\d+:\d+$//;
-        my $hasNeighbors = (not $gnnData->{noNeighborMap}->{$nodeId} or $gnnData->{noNeighborMap}->{$nodeId} == 1) ?
+        my $hasNeighbors = (not exists $gnnData->{noNeighborMap}->{$nodeId} or $gnnData->{noNeighborMap}->{$nodeId} == 1) ?
                                 "false" : $gnnData->{noNeighborMap}->{$nodeId} == -1 ? "n/a" : "true";
         my $genomeId = $gnnData->{genomeIds}->{$nodeId};
         my $hasMatch = $gnnData->{noMatchMap}->{$nodeId} ? "false" : "true";

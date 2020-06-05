@@ -235,6 +235,8 @@ my $fileInfo = {
 
     domain_map_file => "${ssnName}_$domainMapFileName",
     map_file => "${ssnName}_$mapFileName",
+
+    input_seqs_file => "ssn-sequences.fa",
 };
 
 

@@ -200,6 +200,7 @@ SQL
     }
 
     $query .= $clause . " group by ena.AC order by NUM";
+    print "SQL $query\n";
 
     my $neighbors = $self->{dbh}->prepare($query);
     $neighbors->execute;
@@ -210,6 +211,7 @@ SQL
         push @{$ipro{'withneighbors'}{$queryIpro}}, $ac;
     } else {
         $noNeighbors = 1;
+        print "WARNING $ac $id\n";
         print $warning_fh "$ac\tnoneighbor\n" if $warning_fh;
     }
 
@@ -308,6 +310,8 @@ SQL
         @{$ipro{'orig'}{$key}}=uniq @{$ipro{'orig'}{$key}};
     }
 
+    print "NNN $ac $noNeighbors\n";
+    print "\n";
     return \%pfam, \%ipro, 0, $noNeighbors, $genomeId;
 }
 

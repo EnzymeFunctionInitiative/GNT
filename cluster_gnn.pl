@@ -56,7 +56,7 @@ my ($ssnin, $neighborhoodSize, $warningFile, $gnn, $ssnout, $cooccurrence, $stat
     $uniprotIdDir, $uniprotDomainIdDir, $uniref50IdDir, $uniref90IdDir, $uniref50DomainIdDir, $uniref90DomainIdDir,
     $pfamCoocTable, $hubCountFile, $allPfamDir, $splitPfamDir, $allSplitPfamDir, $clusterSizeFile, $clusterNumMapFile, $swissprotClustersDescFile,
     $swissprotSinglesDescFile, $parentDir, $renumberClusters, $disableCache, $skipIdMapping, $skipOrganism, $debug,
-    $outputDir, $excludeFragments,
+    $outputDir, $excludeFragments, $extraSeqFile
 );
 
 my $result = GetOptions(
@@ -97,6 +97,7 @@ my $result = GetOptions(
     "skip-id-mapping"       => \$skipIdMapping,
     "skip-organism"         => \$skipOrganism,
     "exclude-fragments"     => \$excludeFragments,
+    "ssn-sequence-file=s"   => \$extraSeqFile,
     "debug"                 => \$debug,
 );
 
@@ -201,10 +202,20 @@ print "found $numEdges edges\n";
 print "graph name is $title\n";
 
 
+my $writeSeqFn = sub {};
+if ($extraSeqFile) {
+    open my $seqFileFh, ">", $extraSeqFile or die "Unable to write to $extraSeqFile: $!";
+    $writeSeqFn = sub {
+        my $id = shift;
+        my $seq = shift;
+        print $seqFileFh ">$id\n$seq\n";
+    };
+}
+
 
 timer("getNodes");
 print "parsing nodes for accession information\n";
-my ($swissprotDesc) = $util->getNodes();
+my ($swissprotDesc) = $util->getNodes($writeSeqFn);
 timer("getNodes");
 
 
@@ -550,8 +561,9 @@ sub saveClusterNumMap {
             print MAP "Sequence Cluster Number\tNode Cluster Number";
             print MAP "\n";
         }
-        my @row = (@{$numData}, $sizeData->{uniprot}->{$numData->[0]});
-        push @row, $sizeData->{uniref50}->{$numData->[0]}  if $sizeData->{uniref50}->{$numData->[0]};
+        my @row = @{$numData};
+        push @row, $sizeData->{uniprot}->{$numData->[0]} if defined $sizeData->{uniprot}->{$numData->[0]};
+        push @row, $sizeData->{uniref50}->{$numData->[0]} if defined $sizeData->{uniref50}->{$numData->[0]};
         print MAP join("\t", @row), "\n";
     }
     
@@ -840,6 +852,7 @@ sub defaultParameters {
     $arrowDataFile = "" if not $arrowDataFile;
     $pfamCoocTable = "" if not $pfamCoocTable;
     $hubCountFile = "" if not $hubCountFile;
+    $extraSeqFile = "ssn-sequences.fa" if not $extraSeqFile; 
 
     $excludeFragments = defined($excludeFragments);
 }
@@ -872,6 +885,7 @@ sub adjustRelativePaths {
     $arrowDataFile = "$outputDir/$arrowDataFile"                if $arrowDataFile and $arrowDataFile !~ m/^\//;
     $pfamCoocTable = "$outputDir/$pfamCoocTable"                if $pfamCoocTable and $pfamCoocTable !~ m/^\//;
     $hubCountFile = "$outputDir/$hubCountFile"                  if $hubCountFile and $hubCountFile !~ m/^\//;
+    $extraSeqFile = "$outputDir/$extraSeqFile"                  if $extraSeqFile and $extraSeqFile !~ m/^\//;
 }
 
 

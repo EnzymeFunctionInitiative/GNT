@@ -148,6 +148,7 @@ sub getNodesAndEdges{
 # pass through the node list only once, so we need to grab multiple types of data in that pass.
 sub getNodes {
     my $self = shift;
+    my $writeSeqFn = shift || sub {};
 
     my $metanodeMap = {};
     my $idMap = {};
@@ -190,20 +191,31 @@ sub getNodes {
             } elsif ($checkUniref and $attrName =~ m/UniRef(\d+)/) {
                 $self->{has_uniref} = "UniRef$1";
                 $checkUniref = 0; # save some regex evals
-            } elsif ($attrName eq EFI::Annotations::FIELD_SWISSPROT_DESC) {
-                my @childList = $annotation->findnodes('./*');
-                if (scalar @childList) {
-                    foreach my $child (@childList) {
-                        my $val = $child->getAttribute('value');
-                        push(@{$swissprotDesc{$nodeLabel}}, $val);
-                    }
-                } else {
-                    my $val = $annotation->getAttribute('value');
-                    push(@{$swissprotDesc{$nodeLabel}}, $val);
-                }
             } elsif ($attrName eq "Cluster Number" or $attrName eq "Singleton Number") {
                 my $clusterNum = $annotation->getAttribute("value");
                 $clusterNumMap->{$nodeLabel} = $clusterNum;
+            } else {
+                my $getNodeValFn = sub {
+                    my $struct = shift;
+                    my @childList = $annotation->findnodes('./*');
+                    if (scalar @childList) {
+                        foreach my $child (@childList) {
+                            my $val = $child->getAttribute('value');
+                            push(@{$struct->{$nodeLabel}}, $val);
+                        }
+                    } else {
+                        my $val = $annotation->getAttribute('value');
+                        push(@{$struct->{$nodeLabel}}, $val);
+                    }
+                };
+
+                if ($attrName eq EFI::Annotations::FIELD_SWISSPROT_DESC) {
+                    &$getNodeValFn(\%swissprotDesc);
+                } elsif ($attrName eq EFI::Annotations::FIELD_SEQ_KEY and $nodeLabel =~ m/^z/) {
+                    my %seq;
+                    &$getNodeValFn(\%seq);
+                    &$writeSeqFn($nodeLabel, ${$seq{$nodeLabel}}[0]) if scalar @{$seq{$nodeLabel}};
+                }
             }
         }
     }
@@ -500,7 +512,7 @@ sub writeColorSsnMetadata {
     my $writer = shift;
 
     foreach my $mdName (keys %{$self->{metadata}}) {
-        next if $mdName eq "title"; # part of the graph element
+        next if $mdName eq "title" or $mdName eq "__parentNetwork.SUID"; # part of the graph element
         my $mdValue = $self->{metadata}->{$mdName}->{value};
         my $attType = $self->{metadata}->{$mdName}->{type};
         $writer->emptyTag("att", "name" => $mdName, "value" => $mdValue, "type" => $attType);
@@ -802,7 +814,7 @@ sub addFileActions {
     my $info = shift;
 
     my $fastaTool = "$info->{fasta_tool_path} -config $info->{config_file}";
-    $fastaTool .= " -input-sequences $info->{input_seqs_file}" if $info->{input_seqs_file};
+    my $extraFasta = $info->{input_seqs_file} ? " -input-sequences $info->{input_seqs_file}" : "";
 
     my $writeBashZipIf = sub {
         my ($inDir, $outZip, $testFile, $extraFn) = @_;
@@ -816,15 +828,16 @@ sub addFileActions {
     };
 
     my $writeGetFastaIf = sub {
-        my ($inDir, $outZip, $testFile, $domIdDir, $outDir, $domOutDir) = @_;
+        my ($inDir, $outZip, $testFile, $domIdDir, $outDir, $domOutDir, $extraFasta) = @_;
+        $extraFasta = "" if not defined $extraFasta;
         if ($outZip and $inDir) {
             my $outDirArg = " -out-dir $outDir";
             my $extraFn = sub {
-                $B->addAction("    $fastaTool -node-dir $inDir $outDirArg");
+                $B->addAction("    $fastaTool -node-dir $inDir $outDirArg $extraFasta");
             };
             if ($domIdDir and $domOutDir) {
                 $extraFn = sub {
-                    $B->addAction("    $fastaTool -domain-out-dir $domOutDir -node-dir $domIdDir $outDirArg");
+                    $B->addAction("    $fastaTool -domain-out-dir $domOutDir -node-dir $domIdDir $outDirArg $extraFasta");
                 };
             }
             &$writeBashZipIf($inDir, $outZip, $testFile, $extraFn);
@@ -834,7 +847,7 @@ sub addFileActions {
     $B->addAction("zip -jq $info->{ssn_out_zip} $info->{ssn_out}") if $info->{ssn_out} and $info->{ssn_out_zip};
     $B->addAction("HMM_FASTA_DIR=\"\"");
     $B->addAction("HMM_FASTA_DOMAIN_DIR=\"\"");
-    &$writeGetFastaIf($info->{uniprot_node_data_dir}, $info->{uniprot_node_zip}, "cluster_All_UniProt_IDs.txt", $info->{uniprot_domain_node_data_dir}, $info->{fasta_data_dir}, $info->{fasta_domain_data_dir});
+    &$writeGetFastaIf($info->{uniprot_node_data_dir}, $info->{uniprot_node_zip}, "cluster_All_UniProt_IDs.txt", $info->{uniprot_domain_node_data_dir}, $info->{fasta_data_dir}, $info->{fasta_domain_data_dir}, $extraFasta);
     &$writeGetFastaIf($info->{uniref90_node_data_dir}, $info->{uniref90_node_zip}, "cluster_All_UniRef90_IDs.txt", $info->{uniref90_domain_node_data_dir}, $info->{fasta_uniref90_data_dir}, $info->{fasta_uniref90_domain_data_dir});
     &$writeGetFastaIf($info->{uniref50_node_data_dir}, $info->{uniref50_node_zip}, "cluster_All_UniRef50_IDs.txt", $info->{uniref50_domain_node_data_dir}, $info->{fasta_uniref50_data_dir}, $info->{fasta_uniref50_domain_data_dir});
     &$writeBashZipIf($info->{uniprot_domain_node_data_dir}, $info->{uniprot_domain_node_zip}, "cluster_All_UniProt_Domain_IDs.txt");

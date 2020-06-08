@@ -66,7 +66,7 @@ sub makeJob {
     #find DIR -type f -print0 | sed 's%/private_stores/gerlt/efi_test/results/14137/output/cluster-data/hmm/domain/align/%%g' | sed 's/\.afa//g' | xargs -n 1 -P 12  -0 -I % echo weblogo -D fasta -F png --resolution 300 --stacks-per-line 80 -f /private_stores/gerlt/efi_test/results/14137/output/cluster-data/hmm/domain/align/%.afa -o ~/junk/t/weblogo/%.png
     $B->addAction(<<SCRIPT
 module load MUSCLE
-module load numpy
+module load Python
 module load GhostScript
 module load HMMER
 module load skylign

@@ -17,7 +17,7 @@ use EFI::GNN::Arrows;
 
 
 my ($diagramZipFile, $blastSeq, $evalue, $maxNumSeq, $outputFile, $scheduler, $queue, $dryRun,
-    $legacy, $title, $nbSize, $idFile, $jobType, $fastaFile, $jobId);
+    $legacy, $title, $nbSize, $idFile, $jobType, $fastaFile, $jobId, $useUniRef);
 my $result = GetOptions(
     "zip-file=s"            => \$diagramZipFile,
 
@@ -38,30 +38,34 @@ my $result = GetOptions(
     "queue=s"               => \$queue,
     "dryrun"                => \$dryRun,
     "legacy"                => \$legacy,
+    "include-uniref"        => \$useUniRef,
 );
 
 my $usage = <<USAGE
-usage: $0 -diagram-file <filename> [-scheduler <slurm|torque>] [-queue <queue_name>]
-    -zip-file           the file to output data to use for arrow data
+usage: $0 --diagram-file <filename> --zip-file <filename> [--zip-file <filename> OR
+    --blast <seq_or_file> OR --id-file <filename> OR --fasta-file <filename>]
 
-    -blast              the sequence for Option A, which uses BLAST to get similar sequences
-    -evalue             the evalue to use for BLAST
-    -max-seq            the maximum number of sequences to return from the BLAST
-    -nb-size            the neighborhood window on either side of the query sequence
+    --zip-file          the zip'ed file to unzip to a SQLite file (simple unzip job submit)
 
-    -id-file            file containing a list of IDs to use to generate the diagrams
-    -fasta-file         file containing FASTA sequences with headers; we extract the IDs from
+    --blast             the sequence for Option A, which uses BLAST to get similar sequences
+    --evalue            the evalue to use for BLAST
+    --max-seq           the maximum number of sequences to return from the BLAST
+    --nb-size           the neighborhood window on either side of the query sequence
+
+    --id-file           file containing a list of IDs to use to generate the diagrams
+    --fasta-file        file containing FASTA sequences with headers; we extract the IDs from
                         the headers and use those IDs to generate the diagrams
 
-    -output             output sqlite file for Options A-D
-    -title              the job title to save in the output file
-    -job-type           the string to put in for the job type (used by the web app)
+    --output            output sqlite file for Options A-D
+    --title             the job title to save in the output file
+    --job-type          the string to put in for the job type (used by the web app)
 
-    -scheduler          scheduler type (default to torque, but also can be slurm)
-    -queue              the cluster queue to use
-    -dryrun             if this flag is present, the jobs aren't executed but the job scripts
+    --scheduler         scheduler type (default to torque, but also can be slurm)
+    --queue             the cluster queue to use
+    --dryrun            if this flag is present, the jobs aren't executed but the job scripts
                         are output to the terminal
-    -legacy             if this flag is present, the legacy modules are used
+    --legacy            if this flag is present, the legacy modules are used
+    --include-uniref    if this flag is present, also create separate SQLite files for UniRefXX
 USAGE
 ;
 
@@ -117,6 +121,11 @@ my $jobCompletedFile = "$outputDir/job.completed";
 my $jobErrorFile = "$outputDir/job.error";
 my $jobNamePrefix = $jobId ? "${jobId}_" : "";
 
+my $ur50IdFile = "$outputDir/uniref50.ids";
+my $ur90IdFile = "$outputDir/uniref90.ids";
+my $outputUr50File = "$outputFile.uniref50";
+my $outputUr90File = "$outputFile.uniref90";
+
 
 my $schedType = "torque";
 $schedType = "slurm" if (defined($scheduler) and $scheduler eq "slurm") or (not defined($scheduler) and usesSlurm());
@@ -155,6 +164,7 @@ if ($blastSeq) {
     #$B->addAction("grep -v '#' $blastOutFile | cut -f 2,11,12 | sort -k3,3nr | cut -d'|' -f2 > $blastIdListFile");
     $B->addAction("grep -v '#' $blastOutFile | cut -f 2,11,12 | sort -k3,3nr | sed 's/[\t ]\\{1,\\}/|/g' | cut -d'|' -f2,4 > $blastIdListFile");
     $B->addAction("create_diagram_db.pl -id-file $blastIdListFile -db-file $outputFile -blast-seq-file $seqFile -job-type $jobType $titleArg -nb-size $nbSize");
+    outputUniRef($blastIdListFile, $jobType, "-blast-seq-file $seqFile");
     $B->addAction("echo $diagramVersion > $outputDir/diagram.version");
 
     addBashErrorCheck($B, 1, $outputFile);
@@ -165,6 +175,7 @@ elsif ($idFile) {
 
     $B->resource(1, 1, "10gb");
     $B->addAction("create_diagram_db.pl -id-file $idFile -db-file $outputFile -job-type $jobType $titleArg -nb-size $nbSize -do-id-mapping");
+    outputUniRef($idFile, $jobType);
     $B->addAction("echo $diagramVersion > $outputDir/diagram.version");
 
     addBashErrorCheck($B, 0, $outputFile);
@@ -178,6 +189,7 @@ elsif ($fastaFile) {
     $B->resource(1, 1, "10gb");
     $B->addAction("extract_ids_from_fasta.pl -fasta-file $fastaFile -output-file $tempIdFile");
     $B->addAction("create_diagram_db.pl -id-file $tempIdFile -db-file $outputFile -job-type $jobType $titleArg -nb-size $nbSize -do-id-mapping");
+    outputUniRef($tempIdFile, $jobType);
     $B->addAction("rm $tempIdFile");
     $B->addAction("echo $diagramVersion > $outputDir/diagram.version");
     
@@ -210,6 +222,19 @@ chomp $jobId;
 
 print "Diagram job ($jobType) is :\n $jobId";
 
+
+
+sub outputUniRef {
+    my $idFile = shift;
+    my $jobType = shift;
+    my $extra = shift || "";
+
+    if ($useUniRef) {
+        $B->addAction("get_uniref_ids.pl --uniprot $idFile --uniref50 $ur50IdFile --uniref90 $ur90IdFile");
+        $B->addAction("create_diagram_db.pl -id-file $ur50IdFile $extra -db-file $outputUr50File -job-type $jobType $titleArg -nb-size $nbSize -do-id-mapping");
+        $B->addAction("create_diagram_db.pl -id-file $ur90IdFile $extra -db-file $outputUr90File -job-type $jobType $titleArg -nb-size $nbSize -do-id-mapping");
+    }
+}
 
 
 sub addBashErrorCheck {

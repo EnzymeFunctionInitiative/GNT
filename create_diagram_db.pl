@@ -61,9 +61,9 @@ USAGE
 
 die "Invalid -id-file provided: \n$usage" if not -f $idListFile;
 die "No -db-file provided: \n$usage" if not $dbFile;
-die "No configuration file found in environment or as argument: \n$usage" if not -f $configFile and not exists $ENV{EFICONFIG} and not -f $ENV{EFICONFIG};
+die "No configuration file found in environment or as argument: \n$usage" if not -f $configFile and not exists $ENV{EFI_CONFIG} and not -f $ENV{EFI_CONFIG};
 
-$configFile = $ENV{EFICONFIG} if not -f $configFile;
+$configFile = $ENV{EFI_CONFIG} if not -f $configFile;
 
 $nbSize = $defaultNbSize if not $nbSize;
 $title = "" if not $title;

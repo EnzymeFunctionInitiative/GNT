@@ -17,7 +17,7 @@ use EFI::GNN::Arrows;
 
 
 my ($diagramZipFile, $blastSeq, $evalue, $maxNumSeq, $outputFile, $scheduler, $queue, $dryRun,
-    $legacy, $title, $nbSize, $idFile, $jobType, $fastaFile, $jobId, $useUniRef);
+    $legacy, $title, $nbSize, $idFile, $jobType, $fastaFile, $jobId, $seqDbType, $reverseUniRef);
 my $result = GetOptions(
     "zip-file=s"            => \$diagramZipFile,
 
@@ -38,7 +38,8 @@ my $result = GetOptions(
     "queue=s"               => \$queue,
     "dryrun"                => \$dryRun,
     "legacy"                => \$legacy,
-    "include-uniref"        => \$useUniRef,
+    "seq-db-type=s"         => \$seqDbType,
+    "reverse-uniref"        => \$reverseUniRef, # Assume that the input ID list is UniProt IDs, not UniRef
 );
 
 my $usage = <<USAGE
@@ -65,7 +66,9 @@ usage: $0 --diagram-file <filename> --zip-file <filename> [--zip-file <filename>
     --dryrun            if this flag is present, the jobs aren't executed but the job scripts
                         are output to the terminal
     --legacy            if this flag is present, the legacy modules are used
-    --include-uniref    if this flag is present, also create separate SQLite files for UniRefXX
+    --seq-db-type       uniprot (default), uniprot-nf, uniref##/uniref##-nf
+    --reverse-uniref    if --seq-db-type is uniref##[-nf], then assume input ID list is
+                        UniProt; otherwise assume input ID list are UniRef cluster IDs
 USAGE
 ;
 
@@ -97,7 +100,6 @@ if ($blastSeq and $outputFile) {
 my $outputDir = $ENV{PWD};
 my $toolpath = $ENV{"EFIGNN"};
 my $efiGnnMod = $ENV{"EFIGNNMOD"};
-my $blastDb = $ENV{"EFIDBPATH"} . "/combined.fasta";
 my $dbMod = $ENV{"EFIDBMOD"};
 
 
@@ -121,8 +123,9 @@ my $jobCompletedFile = "$outputDir/job.completed";
 my $jobErrorFile = "$outputDir/job.error";
 my $jobNamePrefix = $jobId ? "${jobId}_" : "";
 
-my $ur50IdFile = "$outputDir/uniref50.ids";
-my $ur90IdFile = "$outputDir/uniref90.ids";
+#my $ur50IdFile = "$outputDir/uniref50.ids";
+#my $ur90IdFile = "$outputDir/uniref90.ids";
+my $urIdMapFile = "$outputDir/uniref_ids.map";
 my $outputUr50File = "$outputFile.uniref50";
 my $outputUr90File = "$outputFile.uniref90";
 
@@ -150,6 +153,7 @@ my $jobId;
 if ($blastSeq) {
     $jobType = "BLAST" if not $jobType;
 
+    my $blastDb = $ENV{"EFIDBPATH"} . "/" . getBlastDbName($seqDbType);
     my $seqFile = "$outputDir/query.fa";
     my $blastOutFile = "$outputDir/blast.raw";
     my $blastIdListFile = "$outputDir/blast.ids";
@@ -162,9 +166,10 @@ if ($blastSeq) {
     $B->addAction("module load $blastMod");
     $B->addAction("blastall -p blastp -i $seqFile -d $blastDb -m 8 -e $evalue -b $maxNumSeq -o $blastOutFile");
     #$B->addAction("grep -v '#' $blastOutFile | cut -f 2,11,12 | sort -k3,3nr | cut -d'|' -f2 > $blastIdListFile");
-    $B->addAction("grep -v '#' $blastOutFile | cut -f 2,11,12 | sort -k3,3nr | sed 's/[\t ]\\{1,\\}/|/g' | cut -d'|' -f2,4 > $blastIdListFile");
-    $B->addAction("create_diagram_db.pl -id-file $blastIdListFile -db-file $outputFile -blast-seq-file $seqFile -job-type $jobType $titleArg -nb-size $nbSize");
-    outputUniRef($blastIdListFile, $jobType, "-blast-seq-file $seqFile");
+    #$B->addAction("grep -v '#' $blastOutFile | cut -f 2,11,12 | sort -k3,3nr | sed 's/[\t ]\\{1,\\}/|/g' | cut -d'|' -f2,4 > $blastIdListFile");
+    $B->addAction("grep -v '#' $blastOutFile | cut -f 2,11,12 | sort -k3,3nr | sed 's/^[^|]\\+|\\([^|]\\+\\)|[^\t ]\\+\\(.*\\)\$/\\1\\2/' | cut -f1,2 | sed 's/[	]/|/g' > $blastIdListFile");
+#    $B->addAction("create_diagram_db.pl -id-file $blastIdListFile -db-file $outputFile -blast-seq-file $seqFile -job-type $jobType $titleArg -nb-size $nbSize");
+    outputCreateScript($blastIdListFile, $jobType, "-blast-seq-file $seqFile");
     $B->addAction("echo $diagramVersion > $outputDir/diagram.version");
 
     addBashErrorCheck($B, 1, $outputFile);
@@ -174,8 +179,8 @@ elsif ($idFile) {
     $jobType = "ID_LOOKUP" if not $jobType;
 
     $B->resource(1, 1, "10gb");
-    $B->addAction("create_diagram_db.pl -id-file $idFile -db-file $outputFile -job-type $jobType $titleArg -nb-size $nbSize -do-id-mapping");
-    outputUniRef($idFile, $jobType);
+#    $B->addAction("create_diagram_db.pl -id-file $idFile -db-file $outputFile -job-type $jobType $titleArg -nb-size $nbSize -do-id-mapping");
+    outputCreateScript($idFile, $jobType, "--do-id-mapping");
     $B->addAction("echo $diagramVersion > $outputDir/diagram.version");
 
     addBashErrorCheck($B, 0, $outputFile);
@@ -187,9 +192,8 @@ elsif ($fastaFile) {
     my $tempIdFile = "$outputFile.temp-ids";
 
     $B->resource(1, 1, "10gb");
-    $B->addAction("extract_ids_from_fasta.pl -fasta-file $fastaFile -output-file $tempIdFile");
-    $B->addAction("create_diagram_db.pl -id-file $tempIdFile -db-file $outputFile -job-type $jobType $titleArg -nb-size $nbSize -do-id-mapping");
-    outputUniRef($tempIdFile, $jobType);
+    $B->addAction("extract_ids_from_fasta.pl --fasta-file $fastaFile --output-file $tempIdFile");
+    outputCreateScript($tempIdFile, $jobType, "--do-id-mapping");
     $B->addAction("rm $tempIdFile");
     $B->addAction("echo $diagramVersion > $outputDir/diagram.version");
     
@@ -224,16 +228,19 @@ print "Diagram job ($jobType) is :\n $jobId";
 
 
 
-sub outputUniRef {
+sub outputCreateScript {
     my $idFile = shift;
     my $jobType = shift;
     my $extra = shift || "";
 
-    if ($useUniRef) {
-        $B->addAction("get_uniref_ids.pl --uniprot $idFile --uniref50 $ur50IdFile --uniref90 $ur90IdFile");
-        $B->addAction("create_diagram_db.pl -id-file $ur50IdFile $extra -db-file $outputUr50File -job-type $jobType $titleArg -nb-size $nbSize -do-id-mapping");
-        $B->addAction("create_diagram_db.pl -id-file $ur90IdFile $extra -db-file $outputUr90File -job-type $jobType $titleArg -nb-size $nbSize -do-id-mapping");
+    if ($seqDbType =~ m/uniref([59]0)/) {
+        my $uv = $1;
+        my $revArg = $reverseUniRef ? "" : "--uniref-version $uv";
+        $B->addAction("get_uniref_ids.pl --uniprot-ids $idFile --uniref-mapping $urIdMapFile $revArg");
+        $extra .= " --uniref $uv";
+        $idFile = $urIdMapFile;
     }
+    $B->addAction("create_diagram_db.pl --id-file $idFile $extra --db-file $outputFile --job-type $jobType $titleArg --nb-size $nbSize");
 }
 
 
@@ -253,5 +260,12 @@ sub addBashErrorCheck {
     $B->addAction("");
 }
 
+
+sub getBlastDbName {
+    my $seqType = shift;
+    my $suffix = $seqType =~ m/\-nf$/ ? "_nf" : "";
+    my $name = $seqType =~ m/(uniref[59]0)/ ? "$1$suffix" : "combined$suffix";
+    return "$name.fasta";
+}
 
 

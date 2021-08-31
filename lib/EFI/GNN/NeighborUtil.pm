@@ -3,7 +3,8 @@ package EFI::GNN::NeighborUtil;
 
 use List::MoreUtils qw{uniq};
 use Array::Utils qw(:all);
-
+use Data::Dumper;
+use Time::HiRes qw(time);
 
 
 sub new {
@@ -31,9 +32,9 @@ sub parseInterpro {
     for (my $i = 0; $i < scalar @fams; $i++) {
         next if exists $u{$fams[$i]};
         $u{$fams[$i]} = 1;
-        my $info = {family => $fams[$i], type => $types[$i]};
+        my $info = {family => $fams[$i], type => lc($types[$i])};
         #TODO: remove hardcoded constants here
-        if ($info->{type} eq "Domain" or $info->{type} eq "Family" or $info->{type} eq "Homologous_superfamily") {
+        if ($info->{type} eq "domain" or $info->{type} eq "family" or $info->{type} eq "homologous_superfamily") {
             push @info, $info;
         }
     }
@@ -41,6 +42,13 @@ sub parseInterpro {
     return @info;
 }
 
+
+sub printTime {
+    my ($t1, $name) = @_;
+    $name = $name // "t";
+    printf("$name=%.6f s\n", (time - $t1));
+    return time;
+}
 
 sub findNeighbors {
     my $self = shift;
@@ -68,6 +76,8 @@ sub findNeighbors {
     my $isCircSql = "select * from ena where AC='$ac' order by TYPE limit 1";
     $sth = $self->{dbh}->prepare($isCircSql);
     $sth->execute;
+
+#    my $t1 = time;
 
     my $row = $sth->fetchrow_hashref;
     if (not defined $row or not $row) {
@@ -126,6 +136,8 @@ SQL
             }
         }
     }
+
+#    $t1 = printTime($t1, "t1");
 
     print "Using $genomeId as genome ID\n"                                              if $debug;
 
@@ -198,9 +210,9 @@ SQL
             $clause = "and ((num >= $low and num <= $high) $subClause)";
         }
     }
+#    $t1 = printTime($t1, "t2");
 
     $query .= $clause . " group by ena.AC order by NUM";
-    print "SQL $query\n";
 
     my $neighbors = $self->{dbh}->prepare($query);
     $neighbors->execute;
@@ -226,6 +238,7 @@ SQL
        type => $acc_type, seq_len => $acc_seq_len, ipro_family => $queryIpro, ipro_info => \@ipInfo};
 
     while(my $neighbor=$neighbors->fetchrow_hashref){
+#        $t1 = time;
         my $pfamFam = join('-', sort {$a <=> $b} uniq split(",",$neighbor->{pfam_fam}));
         @ipInfo = $self->parseInterpro($neighbor);
         my $iproFam = join('-', map { $_->{family} } @ipInfo);
@@ -300,7 +313,8 @@ SQL
                                            distance => (abs $distance),
                                            direction => "$origdirection-$direction"
                                          };
-        }	
+        }
+#        $t1 = printTime($t1, "t3");
     }
 
     foreach my $key (keys %{$pfam{'orig'}}){
@@ -310,8 +324,6 @@ SQL
         @{$ipro{'orig'}{$key}}=uniq @{$ipro{'orig'}{$key}};
     }
 
-    print "NNN $ac $noNeighbors\n";
-    print "\n";
     return \%pfam, \%ipro, 0, $noNeighbors, $genomeId;
 }
 

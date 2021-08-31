@@ -22,8 +22,9 @@ use EFI::HMM::Job;
 
 my ($ssnIn, $nbSize, $ssnOut, $cooc, $outputDir, $scheduler, $dryRun, $queue, $jobId);
 my ($statsFile, $clusterSizeFile, $clusterNumMapFile, $swissprotClustersDescFile, $swissprotSinglesDescFile);
-my ($jobConfigFile, $domainMapFileName, $mapFileName, $extraRam);
+my ($jobConfigFile, $domainMapFileName, $mapFileName, $extraRam, $cleanup);
 my ($optMsaOption, $optAaThreshold, $optAaList, $optMinSeqMsa, $optMaxSeqMsa);
+my ($efiRefVer, $efiRefDb, $skipFasta, $convRatioFile);
 my $result = GetOptions(
     "ssn-in=s"                  => \$ssnIn,
     "ssn-out=s"                 => \$ssnOut,
@@ -35,17 +36,22 @@ my $result = GetOptions(
     "map-file-name=s"           => \$mapFileName,
     "domain-map-file-name=s"    => \$domainMapFileName,
     "stats=s"                   => \$statsFile,
+    "conv-ratio=s"              => \$convRatioFile,
     "cluster-sizes=s"           => \$clusterSizeFile,
     "cluster-num-map=s"         => \$clusterNumMapFile,
     "sp-clusters-desc=s"        => \$swissprotClustersDescFile,
     "sp-singletons-desc=s"      => \$swissprotSinglesDescFile,
     "job-config=s"              => \$jobConfigFile,
-    "extra-ram"                 => \$extraRam,
+    "extra-ram:i"               => \$extraRam,
+    "cleanup"                   => \$cleanup,
     "opt-msa-option=s"          => \$optMsaOption,
     "opt-aa-threshold=s"        => \$optAaThreshold,
     "opt-aa-list=s"             => \$optAaList,
     "opt-min-seq-msa=s"         => \$optMinSeqMsa,
     "opt-max-seq-msa=s"         => \$optMaxSeqMsa,
+    "efiref-ver=i"              => \$efiRefVer,
+    "efiref-db=s"               => \$efiRefDb,
+    "skip-fasta"                => \$skipFasta,
 );
 
 my $usage = <<USAGE
@@ -121,17 +127,24 @@ if ($optMsaOption =~ m/CR/ and $optAaList !~ m/^[A-Z,]+$/) {
 }
 
 
+$skipFasta = 0 if $optMsaOption;
+
+
 $outputDir                  = "output"                          if not $outputDir;
 $mapFileName                = "mapping_table.txt"               if not $mapFileName;
 $domainMapFileName          = "domain_mapping_table.txt"        if not $domainMapFileName;
 $jobId                      = ""                                if not $jobId;
 $statsFile                  = "stats.txt"                       if not $statsFile;
+$convRatioFile              = "conv_ratio.txt"                  if not $convRatioFile;
 $clusterSizeFile            = "cluster_sizes.txt"               if not $clusterSizeFile;
 $clusterNumMapFile          = "cluster_num_map.txt"             if not $clusterNumMapFile;
 $swissprotClustersDescFile  = "swissprot_clusters_desc.txt"     if not $swissprotClustersDescFile;
 $swissprotSinglesDescFile   = "swissprot_singletons_desc.txt"   if not $swissprotSinglesDescFile;
+$efiRefVer                  = 0                                 if not $efiRefVer;
 
 my $jobNamePrefix = $jobId ? "${jobId}_" : "";
+
+$cleanup = defined($cleanup);
 
 
 my $outputPath                  = $ENV{PWD} . "/$outputDir";
@@ -150,6 +163,11 @@ my $fastaUniRef50DataDir        = "$clusterDataPath/fasta-uniref50";
 my $fastaUniRef50DomainDataDir  = "$clusterDataPath/fasta-uniref50-domain";
 my $hmmDataDir                  = "$clusterDataPath/hmm";
 
+my $efiRef70NodeDataDir         = "$clusterDataPath/efiref70-nodes";
+my $efiRef50NodeDataDir         = "$clusterDataPath/efiref50-nodes";
+my $fastaEfiRef70DataDir        = "$clusterDataPath/fasta-efiref70";
+my $fastaEfiRef50DataDir        = "$clusterDataPath/fasta-efiref50";
+
 my $uniprotIdZip = "$outputPath/${ssnName}_UniProt_IDs.zip";
 my $uniprotDomainIdZip = "$outputPath/${ssnName}_UniProt_Domain_IDs.zip";
 my $uniRef50IdZip = "$outputPath/${ssnName}_UniRef50_IDs.zip";
@@ -163,6 +181,11 @@ my $fastaUniRef90DomainZip = "$outputPath/${ssnName}_FASTA_UniRef90_Domain.zip";
 my $fastaUniRef50Zip = "$outputPath/${ssnName}_FASTA_UniRef50.zip";
 my $fastaUniRef50DomainZip = "$outputPath/${ssnName}_FASTA_UniRef50_Domain.zip";
 my $hmmZip = "$outputPath/${ssnName}_HMMs.zip";
+
+my $efiRef70IdZip = "$outputPath/${ssnName}_EfiRef70_IDs.zip";
+my $efiRef50IdZip = "$outputPath/${ssnName}_EfiRef50_IDs.zip";
+my $fastaEfiRef70Zip = "$outputPath/${ssnName}_FASTA_EfiRef70.zip";
+my $fastaEfiRef50Zip = "$outputPath/${ssnName}_FASTA_EfiRef50.zip";
 
 # The if statements apply to the mkdir cmd, not the die().
 my $mkPath = sub {
@@ -192,6 +215,17 @@ mkdir $outputPath or die "Unable to create output directory $outputPath: $!" if 
 &$mkPath($fastaUniRef90DataDir);
 &$mkPath($fastaUniRef90DomainDataDir) if not $ssnType or $ssnType eq "UniRef90" and $isDomain;
 
+if ($efiRefVer) {
+    if ($efiRefVer <= 70) {
+        &$mkPath($efiRef70NodeDataDir);
+        &$mkPath($fastaEfiRef70DataDir);
+    }
+    if ($efiRefVer == 50) {
+        &$mkPath($efiRef50NodeDataDir);
+        &$mkPath($fastaEfiRef50DataDir);
+    }
+}
+
 &$mkPath($hmmDataDir) if $optMsaOption;
 
 
@@ -201,7 +235,7 @@ if ($ssnInZip !~ m/\.zip/) { # If it's a .zip we can't predict apriori what the 
 }
 
 # Y = MX+B, M=emperically determined, B = safety factor; X = file size in MB; Y = RAM reservation in GB
-my $ramReservation = defined $extraRam ? 800 : 150;
+my $ramReservation = defined $extraRam ? (length $extraRam ? $extraRam : 800) : 150;
 if ($fileSize) {
     my $ramPredictionM = 0.02;
     my $ramSafety = 10;
@@ -228,50 +262,87 @@ my $fileInfo = {
     ssn_out => "$outputPath/$ssnOut",
     ssn_out_zip => "$outputPath/$ssnOutZip",
 
-    uniprot_node_data_dir => &$absPath($uniprotNodeDataDir),
-    fasta_data_dir => &$absPath($fastaUniProtDataDir),
-    uniprot_node_zip => $uniprotIdZip,
-    fasta_zip => $fastaZip,
-
     domain_map_file => "${ssnName}_$domainMapFileName",
     map_file => "${ssnName}_$mapFileName",
 
     input_seqs_file => "ssn-sequences.fa",
 };
 
+$fileInfo->{uniprot} = {
+    id_dir => &$absPath($uniprotNodeDataDir),
+    fasta_dir => &$absPath($fastaUniProtDataDir),
+    id_zip => $uniprotIdZip,
+    fasta_zip => $fastaZip,
+};
+
 
 # The 'not $ssnType or' statement ensures that this happens.
 if (not $ssnType or $ssnType eq "UniProt" and $isDomain) {
-    $fileInfo->{uniprot_domain_node_data_dir} = &$absPath($uniprotDomainNodeDataDir);
-    $fileInfo->{fasta_domain_data_dir} = &$absPath($fastaUniProtDomainDataDir);
-    $fileInfo->{uniprot_domain_node_zip} = $uniprotDomainIdZip;
-    $fileInfo->{fasta_domain_zip} = $fastaDomainZip;
+    $fileInfo->{uniprot_domain} = {
+        id_dir => &$absPath($uniprotDomainNodeDataDir),
+        fasta_dir => &$absPath($fastaUniProtDomainDataDir),
+        id_zip => $uniprotDomainIdZip,
+        fasta_zip => $fastaDomainZip,
+    };
 }
 
 if (not $ssnType or $ssnType eq "UniRef90" or $ssnType eq "UniRef50") {
-    $fileInfo->{uniref90_node_data_dir} = &$absPath($uniRef90NodeDataDir);
-    $fileInfo->{fasta_uniref90_data_dir} = &$absPath($fastaUniRef90DataDir);
-    $fileInfo->{uniref90_node_zip} = $uniRef90IdZip;
-    $fileInfo->{fasta_uniref90_zip} = $fastaUniRef90Zip;
+    $fileInfo->{uniref90} = {
+        id_dir => &$absPath($uniRef90NodeDataDir),
+        fasta_dir => &$absPath($fastaUniRef90DataDir),
+        id_zip => $uniRef90IdZip,
+        fasta_zip => $fastaUniRef90Zip,
+    };
     if (not $ssnType or $isDomain and $ssnType eq "UniRef90") {
-        $fileInfo->{uniref90_domain_node_data_dir} = &$absPath($uniRef90DomainNodeDataDir);
-        $fileInfo->{fasta_uniref90_domain_data_dir} = &$absPath($fastaUniRef90DomainDataDir);
-        $fileInfo->{uniref90_domain_node_zip} = $uniRef90DomainIdZip;
-        $fileInfo->{fasta_uniref90_domain_zip} = $fastaUniRef90DomainZip;
+        $fileInfo->{uniref90_domain} = {
+            id_dir => &$absPath($uniRef90DomainNodeDataDir),
+            fasta_dir => &$absPath($fastaUniRef90DomainDataDir),
+            id_zip => $uniRef90DomainIdZip,
+            fasta_zip => $fastaUniRef90DomainZip,
+        };
     }
 }
 
 if (not $ssnType or $ssnType eq "UniRef50") {
-    $fileInfo->{uniref50_node_data_dir} = &$absPath($uniRef50NodeDataDir);
-    $fileInfo->{fasta_uniref50_data_dir} = &$absPath($fastaUniRef50DataDir);
-    $fileInfo->{uniref50_node_zip} = $uniRef50IdZip;
-    $fileInfo->{fasta_uniref50_zip} = $fastaUniRef50Zip;
+    $fileInfo->{uniref50} = {
+        id_dir => &$absPath($uniRef50NodeDataDir),
+        fasta_dir => &$absPath($fastaUniRef50DataDir),
+        id_zip => $uniRef50IdZip,
+        fasta_zip => $fastaUniRef50Zip,
+    };
     if (not $ssnType or $isDomain) {
-        $fileInfo->{uniref50_domain_node_data_dir} = &$absPath($uniRef50DomainNodeDataDir);
-        $fileInfo->{fasta_uniref50_domain_data_dir} = &$absPath($fastaUniRef50DomainDataDir);
-        $fileInfo->{uniref50_domain_node_zip} = $uniRef50DomainIdZip;
-        $fileInfo->{fasta_uniref50_domain_zip} = $fastaUniRef50DomainZip;
+        $fileInfo->{uniref50_domain} = {
+            id_dir => &$absPath($uniRef50DomainNodeDataDir),
+            fasta_dir => &$absPath($fastaUniRef50DomainDataDir),
+            id_zip => $uniRef50DomainIdZip,
+            fasta_zip => $fastaUniRef50DomainZip,
+        };
     }
+}
+
+if ($efiRefVer and $efiRefVer <= 70) {
+    $fileInfo->{efiref70} = {
+        id_dir => &$absPath($efiRef70NodeDataDir),
+        fasta_dir => &$absPath($fastaEfiRef70DataDir),
+        id_zip => $efiRef70IdZip,
+        fasta_zip => $fastaEfiRef70Zip,
+    };
+    if ($efiRefVer == 50) {
+        $fileInfo->{efiref50} = {
+            id_dir => &$absPath($efiRef50NodeDataDir),
+            fasta_dir => &$absPath($fastaEfiRef50DataDir),
+            id_zip => $efiRef50IdZip,
+            fasta_zip => $fastaEfiRef50Zip,
+        };
+    }
+    $fileInfo->{uniref90} = {
+        id_dir => &$absPath($uniRef90NodeDataDir),
+        fasta_dir => &$absPath($fastaUniRef90DataDir),
+        id_zip => $uniRef90IdZip,
+        fasta_zip => $fastaUniRef90Zip,
+    };
+    $fileInfo->{efiref_tool} = "$gntPath/get_efiref_ids.pl --efi-db $efiRefDb";
+    $fileInfo->{efiref_ver} = $efiRefVer;
 }
 
 if ($optMsaOption) {
@@ -303,6 +374,8 @@ if ($optMsaOption) {
     $fileInfo->{cluster_size_file} = $clusterSizeFile;
     $fileInfo->{ssn_type} = $ssnType;
     $fileInfo->{hmm_zip_prefix} = "${ssnName}";
+
+    $fileInfo->{compute_pim} = 1;
 }
 
 
@@ -320,12 +393,18 @@ my $scriptArgs =
     " -id-out-domain ${ssnName}_$domainMapFileName" .
     " -config $configFile" .
     " -stats \"$statsFile\"" .
+    " -conv-ratio \"$convRatioFile\"" .
     " -cluster-sizes \"$clusterSizeFile\"" .
     " -cluster-num-map \"$clusterNumMapFile\"" .
     " -sp-clusters-desc \"$swissprotClustersDescFile\"" .
     " -sp-singletons-desc \"$swissprotSinglesDescFile\"" .
     ""
     ;
+if ($efiRefVer) {
+    $scriptArgs .= " --efiref-ver $efiRefVer --efiref-db $efiRefDb";
+    $scriptArgs .= " --efiref-50-dir $fileInfo->{efiref50}->{id_dir}" if $efiRefVer == 50;
+    $scriptArgs .= " --efiref-70-dir $fileInfo->{efiref70}->{id_dir}" if $efiRefVer <= 70;
+}
 
 my $B = $SS->getBuilder();
 
@@ -335,7 +414,7 @@ $B->addAction("module load $gntModule");
 $B->addAction("cd $outputPath");
 $B->addAction("$gntPath/unzip_file.pl -in $ssnInZip -out $ssnIn") if $ssnInZip =~ /\.zip/i;
 $B->addAction("$gntPath/cluster_gnn.pl $scriptArgs");
-EFI::GNN::Base::addFileActions($B, $fileInfo);
+EFI::GNN::Base::addFileActions($B, $fileInfo, $skipFasta);
 if (not $optMsaOption) {
     $B->addAction("touch $outputPath/1.out.completed");
 }
@@ -356,6 +435,24 @@ if ($optMsaOption) {
     $B->renderToFile($jobScript);
     $jobId = $SS->submit($jobScript);
     print "HMM and stuff job is:\n $jobId";
+}
+
+if ($cleanup) {
+    $B = $SS->getBuilder(); 
+    $B->resource(1, 1, "1GB");
+    $B->dependency(0, $jobId);
+    $B->addAction("cd $outputPath");
+    my $paths = join(" ", map { "$outputPath/$_" } (
+        $uniprotNodeDataDir, $uniprotDomainNodeDataDir, $fastaUniProtDataDir, $fastaUniProtDomainDataDir,
+        $uniRef50NodeDataDir, $uniRef50DomainNodeDataDir, $fastaUniRef50DataDir, $fastaUniRef50DomainDataDir,
+        $uniRef90NodeDataDir, $uniRef90DomainNodeDataDir, $fastaUniRef90DataDir, $fastaUniRef90DomainDataDir
+    ));
+    $B->addAction("rm -rf $paths");
+    $jobName = "${jobNamePrefix}cleanup";
+    $jobScript = "$outputPath/$jobName.sh";
+    $B->jobName($jobName);
+    $B->renderToFile($jobScript);
+    $jobId = $SS->submit($jobScript);
 }
 
 

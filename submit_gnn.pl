@@ -24,7 +24,7 @@ my ($pfamDirZip, $allPfamDirZip, $splitPfamDirZip, $allSplitPfamDirZip);
 my ($uniprotIdZip, $uniprotDomainIdZip, $uniRef50IdZip, $uniRef50DomainIdZip, $uniRef90IdZip, $uniRef90DomainIdZip, $idOutputFile, $idOutputDomainFile);
 my ($fastaZip, $fastaDomainZip, $fastaUniRef90Zip, $fastaUniRef90DomainZip, $fastaUniRef50Zip, $fastaUniRef50DomainZip, $noneZip);
 my ($dontUseNewNeighborMethod);
-my ($scheduler, $dryRun, $queue, $gnnOnly, $noSubmit, $jobId, $arrowDataFile, $coocTableFile);
+my ($scheduler, $dryRun, $queue, $gnnOnly, $noSubmit, $jobId, $arrowDataFile, $coocTableFile, $extraRam);
 my ($hubCountFile, $clusterSizeFile, $swissprotClustersDescFile, $swissprotSinglesDescFile, $parentDir, $configFile);
 my $result = GetOptions(
     "output-dir=s"          => \$baseDir,
@@ -63,6 +63,7 @@ my $result = GetOptions(
     "scheduler=s"           => \$scheduler,
     "dry-run"               => \$dryRun,
     "queue=s"               => \$queue,
+    "extra-ram"             => \$extraRam,
     "gnn-only"              => \$gnnOnly,
     "no-submit"             => \$noSubmit,
     "job-id=s"              => \$jobId,
@@ -492,8 +493,8 @@ if ($ssnInZip !~ m/\.zip/) { # If it's a .zip we can't predict apriori what the 
 }
 
 # Y = MX+B, M=emperically determined, B = safety factor; X = file size in MB; Y = RAM reservation in GB
-my $ramReservation = "150";
-if ($fileSize) {
+my $ramReservation = $extraRam ? "800" : "150";
+if (!$extraRam && $fileSize) {
     my $ramPredictionM = 0.033;
     my $ramSafety = 10;
     $fileSize = $fileSize / 1024 / 1024; # MB

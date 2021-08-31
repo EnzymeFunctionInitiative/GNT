@@ -38,6 +38,7 @@ sub getAnnotations {
         my @ipros = $ipros ? (split '-', $ipros) : ();
     
         my $sql = "select family, short_name from family_info where family in ('" . join("','", @pfams, @ipros) . "')";
+        print "SQL $sql\n";
     
         if (not $self->{dbh}->ping()) {
             warn "Database disconnected at " . scalar localtime;

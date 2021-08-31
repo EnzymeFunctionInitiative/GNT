@@ -22,13 +22,14 @@ use EFI::GNN::Base;
 #$configfile=read_file($ENV{'EFICFG'}) or die "could not open $ENV{'EFICFG'}\n";
 #eval $configfile;
 
-my ($nodeDir, $fastaDir, $configFile, $useAllFiles, $domainFastaDir);
+my ($nodeDir, $fastaDir, $configFile, $useAllFiles, $domainFastaDir, $filePat);
 my $result = GetOptions(
     "node-dir=s"        => \$nodeDir,
     "out-dir=s"         => \$fastaDir,
     "use-all-files"     => \$useAllFiles,
     "domain-out-dir=s"  => \$domainFastaDir,
     "config=s"          => \$configFile,
+    "file-pat=s"        => \$filePat,
 );
 
 my $usage=<<USAGE
@@ -60,6 +61,7 @@ if ($configFile and not -f $configFile and not exists $ENV{EFICONFIG} and not -f
 }
 
 $configFile = $ENV{EFICONFIG} if not $configFile or not -f $configFile;
+$filePat = "Uni" if not $filePat;
 
 
 mkdir $fastaDir or die "Unable to create $fastaDir: $!" if $fastaDir and not -d $fastaDir;
@@ -78,13 +80,13 @@ my $singletonPattern = "singleton_UniProt_IDs.txt";
 if ($useAllFiles) {
     $globPattern = "*.txt";
 } else {
-    $pattern = "cluster_Uni*_IDs_";
+    $pattern = "cluster_$filePat*_IDs_";
     $globPattern = "$pattern*.txt";
 }
 
 my @files = sort file_sort glob("$nodeDir/$globPattern");
 if (scalar @files) {
-    (my $pat = $files[0]) =~ s%^.*cluster_(Uni[^_]+)(.*)_IDs.*\.txt%$1$2%;
+    (my $pat = $files[0]) =~ s%^.*cluster_($filePat[^_]+)(.*)_IDs.*\.txt%$1$2%;
     $singletonPattern = "singleton_${pat}_IDs.txt";
     $pattern = "cluster_${pat}_IDs_";
 }

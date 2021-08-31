@@ -188,8 +188,8 @@ sub getNodes {
                     print "Expanded $nodeLabel into $attrAcc\n" if $self->{debug};
                     push @{$metanodeMap->{$nodeLabel}}, $attrAcc if $noDomain ne $attrAcc;
                 }
-            } elsif ($checkUniref and $attrName =~ m/UniRef(\d+)/) {
-                $self->{has_uniref} = "UniRef$1";
+            } elsif ($checkUniref and $attrName =~ m/(Efi|Uni)Ref(\d+)/) {
+                $self->{has_uniref} = $1."Ref$2";
                 $checkUniref = 0; # save some regex evals
             } elsif ($attrName eq "Cluster Number" or $attrName eq "Singleton Number") {
                 my $clusterNum = $annotation->getAttribute("value");
@@ -489,13 +489,14 @@ sub writeColorSsn {
     my $self = shift;
     my $writer = shift;
     my $gnnData = shift;
+    my $extraNodeWriterFn = shift || sub {};
 
     my $title = $self->getMetadata("title");
     $title = "network" if not $title;
 
     $writer->startTag('graph', 'label' => "$title colorized", 'xmlns' => 'http://www.cs.rpi.edu/XGMML');
     $self->writeColorSsnMetadata($writer);
-    $self->writeColorSsnNodes($writer, $gnnData);
+    $self->writeColorSsnNodes($writer, $gnnData, $extraNodeWriterFn);
     $self->writeColorSsnEdges($writer);
     $writer->endTag(); 
 }
@@ -523,6 +524,7 @@ sub writeColorSsnNodes {
     my $self = shift;
     my $writer = shift;
     my $gnnData = shift;
+    my $extraWriterFn = shift || sub {};
 
     my %seqIdCount;
     my %nodeNumIdCount;
@@ -545,6 +547,8 @@ sub writeColorSsnNodes {
     $skipFields{"Present in ENA Database?"} = 1;
     $skipFields{"Genome Neighbors in ENA Database?"} = 1;
     $skipFields{"ENA Database Genome ID"} = 1;
+    $skipFields{"EfiRef50 Cluster IDs"} = 1;
+    $skipFields{"EfiRef70 Cluster IDs"} = 1;
 
     foreach my $node (@{$self->{nodes}}){
         my $nodeLabel = $node->getAttribute('label');
@@ -611,6 +615,7 @@ sub writeColorSsnNodes {
                             $self->saveGnnAttributes($writer, $gnnData, $node);
                         }
                         $savedAttrs = 1;
+                        &$extraWriterFn($nodeLabel, sub { writeGnnField($writer, @_); }, sub { writeGnnListField($writer, @_); });
                     }
 
                     if ($attrName and not exists $skipFields{$attrName}) {
@@ -649,6 +654,7 @@ sub writeColorSsnNodes {
                 if (not $self->{color_only}) {
                     $self->saveGnnAttributes($writer, $gnnData, $node);
                 }
+                &$extraWriterFn($nodeLabel, sub { writeGnnField($writer, @_); }, sub { writeGnnListField($writer, @_); });
             }
 
             $writer->endTag(  );
@@ -812,6 +818,7 @@ sub writeGnnListField {
 sub addFileActions {
     my $B = shift; # This is an EFI::SchedulerApi::Builder object
     my $info = shift;
+    my $skipFasta = shift || 0;
 
     my $fastaTool = "$info->{fasta_tool_path} -config $info->{config_file}";
     my $extraFasta = $info->{input_seqs_file} ? " -input-sequences $info->{input_seqs_file}" : "";
@@ -833,11 +840,15 @@ sub addFileActions {
         if ($outZip and $inDir) {
             my $outDirArg = " -out-dir $outDir";
             my $extraFn = sub {
-                $B->addAction("    $fastaTool -node-dir $inDir $outDirArg $extraFasta");
+                if (not $skipFasta) {
+                    $B->addAction("    $fastaTool -node-dir $inDir $outDirArg $extraFasta");
+                }
             };
             if ($domIdDir and $domOutDir) {
                 $extraFn = sub {
-                    $B->addAction("    $fastaTool -domain-out-dir $domOutDir -node-dir $domIdDir $outDirArg $extraFasta");
+                    if (not $skipFasta) {
+                        $B->addAction("    $fastaTool -domain-out-dir $domOutDir -node-dir $domIdDir $outDirArg $extraFasta");
+                    }
                 };
             }
             &$writeBashZipIf($inDir, $outZip, $testFile, $extraFn);
@@ -847,18 +858,62 @@ sub addFileActions {
     $B->addAction("zip -jq $info->{ssn_out_zip} $info->{ssn_out}") if $info->{ssn_out} and $info->{ssn_out_zip};
     $B->addAction("HMM_FASTA_DIR=\"\"");
     $B->addAction("HMM_FASTA_DOMAIN_DIR=\"\"");
-    &$writeGetFastaIf($info->{uniprot_node_data_dir}, $info->{uniprot_node_zip}, "cluster_All_UniProt_IDs.txt", $info->{uniprot_domain_node_data_dir}, $info->{fasta_data_dir}, $info->{fasta_domain_data_dir}, $extraFasta);
-    &$writeGetFastaIf($info->{uniref90_node_data_dir}, $info->{uniref90_node_zip}, "cluster_All_UniRef90_IDs.txt", $info->{uniref90_domain_node_data_dir}, $info->{fasta_uniref90_data_dir}, $info->{fasta_uniref90_domain_data_dir});
-    &$writeGetFastaIf($info->{uniref50_node_data_dir}, $info->{uniref50_node_zip}, "cluster_All_UniRef50_IDs.txt", $info->{uniref50_domain_node_data_dir}, $info->{fasta_uniref50_data_dir}, $info->{fasta_uniref50_domain_data_dir});
-    &$writeBashZipIf($info->{uniprot_domain_node_data_dir}, $info->{uniprot_domain_node_zip}, "cluster_All_UniProt_Domain_IDs.txt");
-    &$writeBashZipIf($info->{uniref50_domain_node_data_dir}, $info->{uniref50_domain_node_zip}, "cluster_All_UniRef50_Domain_IDs.txt");
-    &$writeBashZipIf($info->{uniref90_domain_node_data_dir}, $info->{uniref90_domain_node_zip}, "cluster_All_UniRef90_Domain_IDs.txt");
-    &$writeBashZipIf($info->{fasta_data_dir}, $info->{fasta_zip}, "all.fasta", sub { $B->addAction("    HMM_FASTA_DIR=$info->{fasta_data_dir}"); });
-    &$writeBashZipIf($info->{fasta_domain_data_dir}, $info->{fasta_domain_zip}, "all.fasta", sub { $B->addAction("    HMM_FASTA_DOMAIN_DIR=$info->{fasta_domain_data_dir}"); });
-    &$writeBashZipIf($info->{fasta_uniref90_data_dir}, $info->{fasta_uniref90_zip}, "all.fasta", sub { $B->addAction("    HMM_FASTA_DIR=$info->{fasta_uniref90_data_dir}"); });
-    &$writeBashZipIf($info->{fasta_uniref90_domain_data_dir}, $info->{fasta_uniref90_domain_zip}, "all.fasta", sub { $B->addAction("    HMM_FASTA_DOMAIN_DIR=$info->{fasta_uniref90_domain_data_dir}"); });
-    &$writeBashZipIf($info->{fasta_uniref50_data_dir}, $info->{fasta_uniref50_zip}, "all.fasta", sub { $B->addAction("    HMM_FASTA_DIR=$info->{fasta_uniref50_data_dir}"); });
-    &$writeBashZipIf($info->{fasta_uniref50_domain_data_dir}, $info->{fasta_uniref50_domain_zip}, "all.fasta", sub { $B->addAction("    HMM_FASTA_DOMAIN_DIR=$info->{fasta_uniref50_domain_data_dir}"); });
+
+    my $outFn = sub {
+        my ($dirs, $domDirs, $type, $extraFasta) = @_;
+        my @args = ($dirs->{id_dir}, $dirs->{id_zip}, "cluster_All_${type}_IDs.txt", $domDirs->{id_dir}, $dirs->{fasta_dir}, $domDirs->{fasta_dir});
+        push @args, $extraFasta if $extraFasta;
+        &$writeGetFastaIf(@args);
+    };
+    &$outFn($info->{uniprot}, $info->{uniprot_domain}, "UniProt", $extraFasta);
+    &$outFn($info->{uniref90}, $info->{uniref90_domain}, "UniRef90");
+    &$outFn($info->{uniref50}, $info->{uniref50_domain}, "UniRef50");
+    &$outFn($info->{efiref50}, $info->{efiref50_domain}, "EfiRef50", "--file-pat EfiRef") if $info->{efiref_tool};
+    &$outFn($info->{efiref70}, $info->{efiref70_domain}, "EfiRef70", "--file-pat EfiRef") if $info->{efiref_tool};
+
+    $outFn = sub {
+        my ($dirs, $type) = @_;
+        &$writeBashZipIf($dirs->{id_dir}, $dirs->{id_zip}, "cluster_All_${type}.txt");
+    };
+    &$outFn($info->{uniprot_domain}, "UniProt_Domain");
+    &$outFn($info->{uniref90_domain}, "UniRef90_Domain");
+    &$outFn($info->{uniref50_domain}, "UniRef50_Domain");
+    &$outFn($info->{efiref50_domain}, "EfiRef50_Domain");
+    &$outFn($info->{efiref70_domain}, "EfiRef70_Domain");
+
+    $outFn = sub {
+        my ($dirs, $varType) = @_;
+        &$writeBashZipIf($dirs->{fasta_dir}, $dirs->{fasta_zip}, "all.fasta", sub { $B->addAction("    HMM_FASTA${varType}_DIR=$dirs->{fasta_dir}"); });
+    };
+    &$outFn($info->{uniprot}, "");
+    &$outFn($info->{uniprot_domain}, "_DOMAIN");
+    &$outFn($info->{uniref90}, "");
+    &$outFn($info->{uniref90_domain}, "_DOMAIN");
+    &$outFn($info->{uniref50}, "");
+    &$outFn($info->{uniref50_domain}, "_DOMAIN");
+    &$outFn($info->{efiref70}, "");
+    &$outFn($info->{efiref70_domain}, "_DOMAIN");
+    &$outFn($info->{efiref50}, "");
+    &$outFn($info->{efiref50_domain}, "_DOMAIN");
+
+    #&$writeGetFastaIf($info->{uniprot_node_data_dir}, $info->{uniprot_node_zip}, "cluster_All_UniProt_IDs.txt", $info->{uniprot_domain_node_data_dir}, $info->{fasta_data_dir}, $info->{fasta_domain_data_dir}, $extraFasta);
+    #&$writeGetFastaIf($info->{uniref90_node_data_dir}, $info->{uniref90_node_zip}, "cluster_All_UniRef90_IDs.txt", $info->{uniref90_domain_node_data_dir}, $info->{fasta_uniref90_data_dir}, $info->{fasta_uniref90_domain_data_dir});
+    #&$writeGetFastaIf($info->{uniref50_node_data_dir}, $info->{uniref50_node_zip}, "cluster_All_UniRef50_IDs.txt", $info->{uniref50_domain_node_data_dir}, $info->{fasta_uniref50_data_dir}, $info->{fasta_uniref50_domain_data_dir});
+    #&$writeBashZipIf($info->{uniprot_domain_node_data_dir}, $info->{uniprot_domain_node_zip}, "cluster_All_UniProt_Domain_IDs.txt");
+    #&$writeBashZipIf($info->{uniref50_domain_node_data_dir}, $info->{uniref50_domain_node_zip}, "cluster_All_UniRef50_Domain_IDs.txt");
+    #&$writeBashZipIf($info->{uniref90_domain_node_data_dir}, $info->{uniref90_domain_node_zip}, "cluster_All_UniRef90_Domain_IDs.txt");
+    #&$writeBashZipIf($info->{fasta_data_dir}, $info->{fasta_zip}, "all.fasta", sub { $B->addAction("    HMM_FASTA_DIR=$info->{fasta_data_dir}"); })
+    #    if not $skipFasta;
+    #&$writeBashZipIf($info->{fasta_domain_data_dir}, $info->{fasta_domain_zip}, "all.fasta", sub { $B->addAction("    HMM_FASTA_DOMAIN_DIR=$info->{fasta_domain_data_dir}"); })
+    #    if not $skipFasta;
+    #&$writeBashZipIf($info->{fasta_uniref90_data_dir}, $info->{fasta_uniref90_zip}, "all.fasta", sub { $B->addAction("    HMM_FASTA_DIR=$info->{fasta_uniref90_data_dir}"); })
+    #    if not $skipFasta;
+    #&$writeBashZipIf($info->{fasta_uniref90_domain_data_dir}, $info->{fasta_uniref90_domain_zip}, "all.fasta", sub { $B->addAction("    HMM_FASTA_DOMAIN_DIR=$info->{fasta_uniref90_domain_data_dir}"); })
+    #    if not $skipFasta;
+    #&$writeBashZipIf($info->{fasta_uniref50_data_dir}, $info->{fasta_uniref50_zip}, "all.fasta", sub { $B->addAction("    HMM_FASTA_DIR=$info->{fasta_uniref50_data_dir}"); })
+    #    if not $skipFasta;
+    #&$writeBashZipIf($info->{fasta_uniref50_domain_data_dir}, $info->{fasta_uniref50_domain_zip}, "all.fasta", sub { $B->addAction("    HMM_FASTA_DOMAIN_DIR=$info->{fasta_uniref50_domain_data_dir}"); })
+    #    if not $skipFasta;
     $B->addAction("zip -jq $info->{gnn_zip} $info->{gnn}") if $info->{gnn} and $info->{gnn_zip};
     $B->addAction("zip -jq $info->{pfamhubfile_zip} $info->{pfamhubfile}") if $info->{pfamhubfile_zip} and $info->{pfamhubfile};
     $B->addAction("zip -jq -r $info->{pfam_zip} $info->{pfam_dir} -i '*'") if $info->{pfam_zip} and $info->{pfam_dir};
@@ -867,6 +922,30 @@ sub addFileActions {
     $B->addAction("zip -jq -r $info->{all_split_pfam_zip} $info->{all_split_pfam_dir} -i '*'") if $info->{all_split_pfam_zip} and $info->{all_split_pfam_dir};
     $B->addAction("zip -jq -r $info->{none_zip} $info->{none_dir}") if $info->{none_zip} and $info->{none_dir};
     $B->addAction("zip -jq $info->{arrow_zip} $info->{arrow_file}") if $info->{arrow_zip} and $info->{arrow_file};
+
+    #if ($info->{efiref_tool}) {
+    #    &$writeGetFastaIf($info->{efiref70_node_data_dir}, $info->{efiref70_node_zip}, "cluster_All_EfiRef70_IDs.txt", "", $info->{fasta_efiref70_data_dir}, "", "--file-pat Efi");
+    #    &$writeGetFastaIf($info->{efiref50_node_data_dir}, $info->{efiref50_node_zip}, "cluster_All_EfiRef50_IDs.txt", "", $info->{fasta_efiref50_data_dir}, "", "--file-pat Efi");
+    #    &$writeBashZipIf($info->{fasta_efiref70_data_dir}, $info->{fasta_efiref70_zip}, "all.fasta");
+    #    &$writeBashZipIf($info->{fasta_efiref50_data_dir}, $info->{fasta_efiref50_zip}, "all.fasta");
+    #}
+        
+    #    my $idDir = "";
+    #    my $outParms = "--uniref90-dir $info->{uniref90_node_data_dir}";
+    #    if ($info->{efiref_ver} == 70) {
+    #        # The SSN that is input is a EfiRef SSN, but the scripts think it's a UniProt SSN.
+    #        $B->addAction("mv $info->{uniprot_node_data_dir}/* $info->{efiref70_node_data_dir}");
+    #        $B->addAction("mv $info->{fasta_data_dir}/* $info->{fasta_efiref70_data_dir}");
+    #        $idDir = $info->{efiref70_node_data_dir};
+    #    } elsif ($info->{efiref_ver} == 50) {
+    #        $B->addAction("mv $info->{uniprot_node_data_dir}/* $info->{efiref50_node_data_dir}");
+    #        $B->addAction("mv $info->{fasta_data_dir}/* $info->{fasta_efiref50_data_dir}");
+    #        $idDir = $info->{efiref50_node_data_dir};
+    #        $outParms .= " --efiref70-dir $info->{efiref70_node_data_dir}";
+    #    }
+    #    $B->addAction("$info->{efiref_tool} --seed-ver $info->{efiref_ver} --seed-id-dir $idDir $outParms");
+    #    $B->addAction("
+    #}
 }
 
 sub getColor {

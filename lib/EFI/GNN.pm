@@ -215,6 +215,7 @@ sub getClusterHubData {
     my $neighborhoodSize = shift;
     my $warning_fh = shift;
     my $useCircTest = shift;
+    #my $extras = shift || {};
 
     my $supernodeOrder = $self->{network}->{cluster_order};
 
@@ -232,17 +233,25 @@ sub getClusterHubData {
 
     my $nbFind = new EFI::GNN::NeighborUtil(dbh => $self->{dbh}, use_nnm => $self->{use_new_neighbor_method});
 
+    #my $extraCache = {};
     foreach my $clusterId (@{ $supernodeOrder }) {
         $noneFamily{$clusterId} = {};
         my $nodeIds = $self->getIdsInCluster($clusterId, ALL_IDS|NO_DOMAIN|INTERNAL);
         my $clusterNum = $self->getClusterNumber($clusterId);
+        print STDERR "CID: $clusterId $clusterNum\n";
 
+        #foreach my $accession (@$nodeIds, @{$extras->{$clusterId}}) {
         foreach my $accession (@$nodeIds) {
+            # This is exclusively for retrieving data for UniRef seed sequences.  It won't work properly
+            # for any other purpose.
+            #next if $extraCache->{$accession};
+            #$extraCache->{$accession} = 
             (my $accNoDomain = $accession) =~ s/:\d+:\d+$//;
             $accession = $accNoDomain;
             $accessionData{$accession}->{neighbors} = [];
             my ($pfamsearch, $iprosearch, $localNoMatch, $localNoNeighbors, $genomeId) =
                 $nbFind->findNeighbors($accNoDomain, $neighborhoodSize, $warning_fh, $useCircTest, $noneFamily{$clusterId}, $accessionData{$accession});
+####            $self->{NCACHE}->{$accession} = [$pfamsearch, $iprosearch] if not $self->{NCACHE}->{$accession};
             $noNeighbors{$accession} = $localNoNeighbors;
             $genomeIds{$accession} = $genomeId;
             $noMatches{$accession} = $localNoMatch;
@@ -520,8 +529,6 @@ sub saveGnnAttributes {
         $self->{anno}->{UniRef90_IDs}->{display} => 1,
         $self->{anno}->{ACC}->{display} => 1,
     );
-
-    print Dumper($gnnData->{noNeighborMap});
 
     # If this is a repnode network, there will be a child node named "ACC". If so, we need to wrap
     # all of the no matches, etc into a list rather than a simple attribute.
@@ -872,6 +879,42 @@ sub writePfamNoneClusters {
     close ALLNONE;
 }
 
+sub writeConvRatio {
+    my $self = shift;
+    my $file = shift;
+    my $degree = shift;
+    my $getAllIdsFn = shift;
+    my $getMetanodeIdsFn = shift;
+
+    my @clusterNumbers = sort { $a <=> $b } $self->getClusterNumbers();
+
+    open my $outFh, ">", $file or die "Unable to write to convergence ratio file $file: $!";
+
+    $outFh->print(join("\t", "Cluster Number", "Convergence Ratio", "Number of SSN Nodes", "Number of UniProt IDs", "Number of Edges"), "\n");
+    foreach my $clusterNum (@clusterNumbers) {
+        my $numDegree = 0;
+        my $nodeIds = $getMetanodeIdsFn ? &$getMetanodeIdsFn($clusterNum) : $self->getIdsInCluster($clusterNum, METANODE_IDS);
+        my $numNodes = scalar @$nodeIds;
+        my $rawIds = $getAllIdsFn ? &$getAllIdsFn($clusterNum) : $self->getIdsInCluster($clusterNum, ALL_IDS);
+        my $numIds = scalar @$rawIds;
+        print "$clusterNum\t$numIds\n";
+        foreach my $id (@$rawIds) {
+            next if not $degree->{$id};
+            $numDegree += $degree->{$id};
+            print join("\t", $clusterNum, $id, $degree->{$id}), "\n";
+        }
+        # $numDegree already counts the edges twice
+        my $denom = $numIds * ($numIds - 1);
+        my $convRatio = 0;
+        $convRatio = $numDegree / $denom if $denom > 0;
+        $convRatio = sprintf("%.1e", $convRatio);
+        #$convRatio = int($convRatio * 100000 + 0.5) / 100000;
+        $outFh->print(join("\t", $clusterNum, $convRatio, $numNodes, $numIds, $numDegree/2), "\n"); #, $numDegree, $numIds), "\n");
+    }
+
+    close $outFh;
+}
+
 sub writeSsnStats {
     my $self = shift;
     my $spDesc = shift; # swissprot description
@@ -879,6 +922,7 @@ sub writeSsnStats {
     my $sizeFile = shift;
     my $spClustersDescFile = shift;
     my $spSinglesDescFile = shift;
+    my $getIdsFn = shift;
 
     my @clusterNumbers = sort { $a <=> $b } $self->getClusterNumbers();
 
@@ -892,7 +936,7 @@ sub writeSsnStats {
     my $numSingles = 0;
 
     foreach my $clusterNum (@clusterNumbers) {
-        my $rawIds = $self->getIdsInCluster($clusterNum, ALL_IDS);
+        my $rawIds = $getIdsFn ? &$getIdsFn($clusterNum) : $self->getIdsInCluster($clusterNum, ALL_IDS);
         my @ids = sort @$rawIds;
         my $count = scalar @ids;
         push @metaIds, @ids;

@@ -45,6 +45,7 @@ use EFI::Util qw(checkNetworkType);
 
 use lib $FindBin::Bin . "/lib";
 use EFI::Database;
+use EFI::Annotations;
 use EFI::GNN;
 use EFI::GNN::Base;
 use EFI::GNN::Arrows;
@@ -60,6 +61,7 @@ my ($ssnin, $neighborhoodSize, $warningFile, $gnn, $ssnout, $cooccurrence, $stat
     $outputDir, $excludeFragments, $extraSeqFile, $convRatioFile,
     $useUniRef, $efiRefVer, $efiRefDb, $efiRef50IdDir, $efiRef70IdDir,
 );
+my $legacyAnno; # Remove the legacy after summer 2022
 
 my $result = GetOptions(
     "output-dir=s"          => \$outputDir,
@@ -107,6 +109,7 @@ my $result = GetOptions(
     "efiref-70-dir=s"       => \$efiRef70IdDir,
     "conv-ratio=s"          => \$convRatioFile,
     "debug"                 => \$debug,
+    "legacy-anno"           => \$legacyAnno,
 );
 
 my $usage = <<USAGE
@@ -186,6 +189,7 @@ $gnnArgs{all_split_pfam_dir} = $allSplitPfamDir if $allSplitPfamDir and -d $allS
 $gnnArgs{color_util} = $colorUtil;
 
 
+my $anno = new EFI::Annotations;
 
 my $util = new EFI::GNN(%gnnArgs);
 
@@ -230,10 +234,10 @@ timer("getNodes");
 
 timer("getTaxonIdsAndSpecies");
 print "getting species and taxon IDs\n";
-my $annoUtil = new EFI::GNN::AnnotationUtil(dbh => $dbh);
 my $allIds = $util->getAllNetworkIds();
 my ($species, $taxonIds) = ({}, {});
 if (not $skipOrganism) {
+    my $annoUtil = new EFI::GNN::AnnotationUtil(dbh => $dbh, efi_anno => new EFI::Annotations);
     ($species, $taxonIds) = $annoUtil->getMultipleAnnotations($allIds);
 }
 timer("getTaxonIdsAndSpecies");
@@ -735,12 +739,22 @@ sub getSharedClusterToIdMapping {
 
     my $swissprot = {};
 
+    # Remove the legacy after summer 2022
+    my $spCol = $legacyAnno ? "SwissProt_Description AS swissprot_description" : "swissprot_description";
+    my $spStatusCol = $legacyAnno ? "STATUS AS swissprot_status" : "swissprot_status";
+    my $fragCol = $legacyAnno ? "Fragment AS is_fragment" : "is_fragment";
     my $swissprotSql = "";
     my $swissprotSqlCol = "";
-    if ($lookupSwissprot) {
+    if ($lookupSwissprot or $excludeFragments) {
         $swissprotSql = "LEFT JOIN annotations AS A ON U.accession = A.accession";
-        $swissprotSqlCol = ", A.SwissProt_Description AS swissprot";
+        if ($legacyAnno) {
+            $swissprotSqlCol = ", A.$spCol";
+        } else {
+            $swissprotSqlCol = ", A.metadata";
+        }
+        $swissprotSqlCol .= ", A.$spStatusCol";
     }
+    my $baseSql = "SELECT U.* $swissprotSqlCol FROM uniref AS U $swissprotSql";
 
     my @clusterNumbers = @$clusterNums;
 
@@ -752,16 +766,28 @@ sub getSharedClusterToIdMapping {
         $singletonClusters{$clNum} = 1 if scalar @$nodeIds == 1;
         foreach my $id (@$nodeIds) {
             (my $proteinId = $id) =~ s/:\d+:\d+$//;
+            # UniRef
             if ($ssnSeqSource) {
-                my $sql = "SELECT U.* $swissprotSqlCol FROM uniref AS U $swissprotSql WHERE U.accession = '$proteinId'";
+                my $sql = "$baseSql WHERE U.accession = '$proteinId'";
                 if ($excludeFragments) {
-                    $sql = "SELECT U.*, A.SwissProt_Description AS swissprot FROM uniref AS U LEFT JOIN annotations AS A ON U.accession = A.accession WHERE U.accession = '$proteinId' AND A.Fragment = 0";
+                    $sql = " AND A.$fragCol = 0";
                 }
-                print "$sql\n";
                 my $sth = $dbh->prepare($sql);
                 $sth->execute;
                 while (my $row = $sth->fetchrow_hashref) {
-                    push @{$swissprot->{$proteinId}}, $row->{swissprot} if $lookupSwissprot;
+                    if ($lookupSwissprot) {
+                        my $descVal = "";
+                        if ($legacyAnno) {
+                            $descVal = $row->{swissprot_description};
+                        } else {
+                            my $struct = $anno->decode_meta_struct($row->{metadata});
+                            $descVal = $row->{swissprot_status} ? ($struct->{description} // "NA") : "NA";
+                            #TODO: fix this after 202203 release
+                            $descVal =~ s/(Short|Flags|AltName|RecName)[:=].*$//;
+                            $descVal =~ s/;?\s*$//;
+                        }
+                        push @{$swissprot->{$proteinId}}, $descVal;
+                    }
                     $uniref50IdsClusterMap{$row->{uniref50_seed}} = $clNum if $ssnSeqSource < 90;
                     $uniref90IdsClusterMap{$row->{uniref90_seed}} = $clNum if $ssnSeqSource >= 50;
                     $uniProtUniRefMap{$proteinId} = [$row->{uniref50_seed}, $row->{uniref90_seed}];
@@ -771,7 +797,7 @@ sub getSharedClusterToIdMapping {
             my $addSeq = 1;
             if ($excludeFragments) {
                 $addSeq = 1;
-                my $sql = "SELECT Fragment FROM annotations WHERE accession = '$proteinId' AND Fragment = 0";
+                my $sql = "SELECT $fragCol FROM annotations WHERE accession = '$proteinId' AND $fragCol = 0";
                 my $sth = $dbh->prepare($sql);
                 $sth->execute;
                 $addSeq = $sth->fetchrow_hashref ? 1 : 0;
@@ -780,17 +806,30 @@ sub getSharedClusterToIdMapping {
                 $uniprotIdsClusterMap{$proteinId} = $clNum;
                 $uniprotDomainIdsClusterMap{$id} = $clNum if $id ne $proteinId;
             }
-            #if (not !$ssnSeqSource and $lookupSwissprot) {
-            #    my $sql = "SELECT SwissProt_Description AS swissprot FROM annotations WHERE accession = '$proteinId'";
-            #    my $sth = $dbh->prepare($sql);
-            #    $sth->execute;
-            #    while (my $row = $sth->fetchrow_hashref) {
-            #        push @{$swissprot->{$proteinId}}, $row->{swissprot};
-            #    }
-            #}
+            if (not $ssnSeqSource and $lookupSwissprot) {
+                my $sql = "SELECT metadata FROM annotations WHERE accession = '$proteinId'";
+                if ($legacyAnno) {
+                    $sql = "SELECT $spCol FROM annotations WHERE accession = '$proteinId'";
+                }
+#                print "UP SP $sql\n";
+                my $sth = $dbh->prepare($sql);
+                $sth->execute;
+                while (my $row = $sth->fetchrow_hashref) {
+                    my $descVal = "";
+                    if ($legacyAnno) {
+                        $descVal = $row->{swissprot_description};
+                    } else {
+                        my $struct = $anno->decode_meta_struct($row->{metadata});
+                        $descVal = $row->{swissprot_status} ? ($struct->{description} // "NA") : "NA";
+                        #todo: FIX THIS After 202203 release
+                        $descVal =~ s/(Short|Flags|AltName|RecName)[:=].*$//;
+                        $descVal =~ s/;?\s*$//;
+                    }
+                    push @{$swissprot->{$proteinId}}, $row->{swissprot_description};
+                }
+            }
         }
     }
-print Dumper($swissprot);
 
     # Now reverse the mapping to obtain a mapping of cluster numbers to sequence IDs.
     my (%uniref50ClusterIdsMap, %uniref90ClusterIdsMap, %uniprotIdsMap, %uniprotDomainIdsMap);
@@ -898,6 +937,8 @@ sub saveClusterIdFiles2 {
     return 0 if not scalar @clusterNumbers;
     
     open SINGLES, ">", "$outputDir/singleton_${filePattern}_IDs.txt";
+    open NODESINGLES, ">", "$outputDir/node_singleton_${filePattern}_IDs.txt";
+#    open NODESINGLES5, ">", "$outputDir/node5_singleton_${filePattern}_IDs.txt";
 
     my $sizeData = {};
 
@@ -906,22 +947,27 @@ sub saveClusterIdFiles2 {
     foreach my $clNum (@clusterNumbers) {
         my @accIds = sort @{$mapping->{$clNum}};
         if (not exists $singletonClusters->{$clNum}) {
-            print "$clNum $outputDir/cluster_${filePattern}_IDs_${clNum}.txt\n";
+#            print "$clNum $outputDir/cluster_${filePattern}_IDs_${clNum}.txt\n";
             open FH, ">", "$outputDir/cluster_${filePattern}_IDs_${clNum}.txt";
+            my $isSmall = scalar @accIds < 5;
             foreach my $accId (@accIds) {
                 print FH "$accId\n";
                 push @ids, $accId;
+                print NODESINGLES "$accId\n" if $isSmall;
             }
             close FH;
             $sizeData->{$clNum} = scalar @accIds;
         } else {
             my $accId = $accIds[0];
             print SINGLES "$accId\n";
+#            print NODESINGLES "$accId\n";
         }
         $idCount++;
     }
 
     close SINGLES;
+    close NODESINGLES;
+#    close NODESINGLES5;
 
     open ALL, ">", "$outputDir/cluster_All_${filePattern}_IDs.txt";
     foreach my $id (sort @ids) {

@@ -17,12 +17,13 @@ use FindBin;
 use lib $FindBin::Bin . "/lib";
 
 use EFI::Database;
+use EFI::Annotations;
 use EFI::GNN::Base;
 
 #$configfile=read_file($ENV{'EFICFG'}) or die "could not open $ENV{'EFICFG'}\n";
 #eval $configfile;
 
-my ($nodeDir, $fastaDir, $configFile, $useAllFiles, $domainFastaDir, $filePat);
+my ($nodeDir, $fastaDir, $configFile, $useAllFiles, $domainFastaDir, $filePat, $legacyAnno);
 my $result = GetOptions(
     "node-dir=s"        => \$nodeDir,
     "out-dir=s"         => \$fastaDir,
@@ -30,6 +31,7 @@ my $result = GetOptions(
     "domain-out-dir=s"  => \$domainFastaDir,
     "config=s"          => \$configFile,
     "file-pat=s"        => \$filePat,
+    "legacy-anno"       => \$legacyAnno,
 );
 
 my $usage=<<USAGE
@@ -71,6 +73,8 @@ mkdir $domainFastaDir or die "Unable to create $fastaDir: $!" if $domainFastaDir
 
 my $db = new EFI::Database(config_file => $configFile);
 my $dbh = $db->getHandle();
+
+my $anno = new EFI::Annotations;
 
 my $blastDbPath = $ENV{EFIDBPATH};
 
@@ -229,9 +233,14 @@ sub writeSequence {
     my $seq = shift;
     my $header = shift;
 
+    my $baseSql = "SELECT annotations.metadata, GROUP_CONCAT(PFAM.id) AS PFAM FROM annotations LEFT JOIN PFAM ON annotations.accession = PFAM.accession";
+    if ($legacyAnno) {
+        $baseSql = "SELECT annotations.organism, GROUP_CONCAT(PFAM.id) AS PFAM FROM annotations LEFT JOIN PFAM ON annotations.accession = PFAM.accession";
+    }
+
     if (not $header) {
         (my $sqlAcc = $accession) =~ s/:\d+:\d+$//;
-        my $sql = "SELECT annotations.Organism, GROUP_CONCAT(PFAM.id) AS PFAM FROM annotations LEFT JOIN PFAM ON annotations.accession = PFAM.accession WHERE annotations.accession = '$sqlAcc'";
+        my $sql = "$baseSql WHERE annotations.accession = '$sqlAcc'";
         my $sth = $dbh->prepare($sql);
         $sth->execute();
         
@@ -240,8 +249,13 @@ sub writeSequence {
     
         my $row = $sth->fetchrow_hashref();
         if ($row) {
-            $organism = $row->{Organism};
-            $pfam = $row->{PFAM};
+            if ($legacyAnno) {
+                $organism = $row->{organism};
+            } else {
+                my $struct = $anno->decode_meta_struct($row->{metadata});
+                $organism = $struct->{organism};
+            }
+            $pfam = $row->{PFAM} // "";
         }
 
         $header = "$accession $clusterNum|$organism|$pfam";

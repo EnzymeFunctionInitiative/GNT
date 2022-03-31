@@ -19,6 +19,7 @@ use lib $FindBin::Bin . "/lib";
 use EFI::GNN::NeighborUtil;
 use EFI::GNN::Arrows;
 use EFI::Database;
+use EFI::Annotations;
 use EFI::GNN::ColorUtil;
 use EFI::GNN::AnnotationUtil;
 use EFI::IdMapping;
@@ -87,7 +88,7 @@ $dbArgs{config_file_path} = $configFile;
 my $mysqlDb = new EFI::Database(%dbArgs);
 my $mysqlDbh = $mysqlDb->getHandle();
 my $colorUtil = new EFI::GNN::ColorUtil(dbh => $mysqlDbh);
-my $annoUtil = new EFI::GNN::AnnotationUtil(dbh => $mysqlDbh);
+my $annoUtil = new EFI::GNN::AnnotationUtil(dbh => $mysqlDbh, efi_anno => new EFI::Annotations);
 
 my $clusterMap = {}; # Map UniProt ID to cluster number
 my $clusterNumMap = {}; # Map cluster number, which is a numeric value assigned when reading, to cluster ID 

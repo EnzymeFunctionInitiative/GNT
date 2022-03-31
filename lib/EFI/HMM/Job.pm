@@ -75,16 +75,18 @@ sub makeJob {
     $B->dependency(0, $depJobId);
     $B->setScriptAbortOnError(0); # don't abort on error
 
-    my $clustalModule = $doPim ? "module load Clustal-Omega" : "";
+    my $clustalModule = $doPim ? "module load Clustal-Omega/1.2.4-IGB-gcc-4.9.4" : "";
     #find DIR -type f -print0 | sed 's%/private_stores/gerlt/efi_test/results/14137/output/cluster-data/hmm/domain/align/%%g' | sed 's/\.afa//g' | xargs -n 1 -P 12  -0 -I % echo weblogo -D fasta -F png --resolution 300 --stacks-per-line 80 -f /private_stores/gerlt/efi_test/results/14137/output/cluster-data/hmm/domain/align/%.afa -o ~/junk/t/weblogo/%.png
     $B->addAction(<<SCRIPT
-module load MUSCLE
-module load Python
-module load GhostScript
-module load HMMER
-module load skylign
-module load R
-module load CD-HIT
+source /etc/profile
+module purge
+module load MUSCLE/3.8.31-IGB-gcc-4.9.4
+module load Python/3.6.1-IGB-gcc-4.9.4
+module load GhostScript/9.21-IGB-gcc-4.9.4
+module load HMMER/3.2.1-IGB-gcc-4.9.4
+module load skylign/1.1-IGB-gcc-4.9.4-Perl-5.24.1
+module load R/3.3.3-IGB-gcc-4.9.4
+module load CD-HIT/4.6.6-IGB-gcc-4.9.4
 $clustalModule
 
 export PYTHONPATH=\$PYTHONPATH:/home/n-z/noberg/lib/python

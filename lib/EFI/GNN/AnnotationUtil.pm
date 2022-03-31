@@ -4,6 +4,8 @@ package EFI::GNN::AnnotationUtil;
 use warnings;
 use strict;
 
+use Data::Dumper;
+
 
 sub new {
     my ($class, %args) = @_;
@@ -12,6 +14,7 @@ sub new {
     bless($self, $class);
 
     $self->{dbh} = $args{dbh};
+    $self->{anno} = $args{efi_anno};
 
     return $self;
 }
@@ -38,7 +41,6 @@ sub getAnnotations {
         my @ipros = $ipros ? (split '-', $ipros) : ();
     
         my $sql = "select family, short_name from family_info where family in ('" . join("','", @pfams, @ipros) . "')";
-        print "SQL $sql\n";
     
         if (not $self->{dbh}->ping()) {
             warn "Database disconnected at " . scalar localtime;
@@ -69,8 +71,21 @@ sub getMultipleAnnotations {
 
     my (%organism, %taxId, %annoStatus, %desc);
 
+    my $spCol = "swissprot_status";
+    my $orgCol = "organism";
+    my $taxCol = "taxonomy_id";
+    my $descCol = "description";
+    my $baseSql = "select $taxCol, $spCol, metadata from annotations";
+    if ($self->{legacy_anno}) {
+        $spCol = "STATUS AS swissprot_status";
+        $orgCol  = "Organism AS organism";
+        $taxCol = "Taxonomy_ID AS taxonomy_id";
+        $descCol = "Description AS description";
+        $baseSql = "select $orgCol, $taxCol, $spCol, $descCol from annotations";
+    }
+
     foreach my $accession (@$accessions) {
-        my $sql = "select Organism,Taxonomy_ID,STATUS,Description from annotations where accession='$accession'";
+        my $sql = "$baseSql where accession='$accession'";
     
         my $sth = $self->{dbh}->prepare($sql);
         $sth->execute;
@@ -80,15 +95,18 @@ sub getMultipleAnnotations {
             $self->{dbh} = $self->{dbh}->clone() or die "Cannot reconnect to database.";
         }
 
-        my ($organism, $taxId, $annoStatus, $desc) = ("", "", "", "");
         if (my $row = $sth->fetchrow_hashref) {
-            $organism{$accession} = $row->{Organism};
-            $taxId{$accession} = $row->{Taxonomy_ID};
-            $annoStatus{$accession} = $row->{STATUS};
-            $desc{$accession} = $row->{Description};
+            if ($self->{legacy_anno}) {
+                $organism{$accession} = $row->{$orgCol};
+                $desc{$accession} = $row->{$descCol};
+            } else {
+                my $struct = $self->{anno}->decode_meta_struct($row->{metadata});
+                $organism{$accession} = $struct->{$orgCol};
+                $desc{$accession} = $struct->{$descCol};
+            }
+            $taxId{$accession} = $row->{$taxCol};
+            $annoStatus{$accession} = $row->{$spCol};
         }
-
-        $annoStatus = $annoStatus eq "Reviewed" ? "SwissProt" : "TrEMBL";
     }
 
     return (\%organism, \%taxId, \%annoStatus, \%desc);

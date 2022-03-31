@@ -413,6 +413,8 @@ $B->addAction("module load $dbModule");
 $B->addAction("module load $gntModule");
 $B->addAction("cd $outputPath");
 $B->addAction("$gntPath/unzip_file.pl -in $ssnInZip -out $ssnIn") if $ssnInZip =~ /\.zip/i;
+#TODO: remove this hack
+$B->addAction("/home/n-z/noberg/dev/EST/fix_xgmml.pl --input $ssnIn --rename");
 $B->addAction("$gntPath/cluster_gnn.pl $scriptArgs");
 EFI::GNN::Base::addFileActions($B, $fileInfo, $skipFasta);
 if (not $optMsaOption) {

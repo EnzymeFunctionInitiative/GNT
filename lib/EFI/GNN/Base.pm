@@ -189,8 +189,8 @@ sub getNodes {
                     print "Expanded $nodeLabel into $attrAcc\n" if $self->{debug};
                     push @{$metanodeMap->{$nodeLabel}}, $attrAcc if $noDomain ne $attrAcc;
                 }
-            } elsif ($checkUniref and $attrName =~ m/(Efi|Uni)Ref(\d+)/) {
-                $self->{has_uniref} = $1."Ref$2";
+            } elsif ($checkUniref and $attrName =~ m/UniRef(\d+)/) {
+                $self->{has_uniref} = "UniRef$1";
                 $checkUniref = 0; # save some regex evals
             } elsif ($attrName eq "Cluster Number" or $attrName eq "Singleton Number") {
                 my $clusterNum = $annotation->getAttribute("value");

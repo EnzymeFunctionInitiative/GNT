@@ -170,7 +170,7 @@ sub findNeighbors {
 
     my @ids = @$ids;
 
-    my $nbFind = new EFI::GNN::NeighborUtil(dbh => $dbh, use_nnm => 1);
+    my $nbFind = new EFI::GNN::NeighborUtil(dbh => $dbh, use_nnm => 1, efi_anno => new EFI::Annotations);
 
     my $useCircTest = 1;
     my $noneFamily = {};

@@ -12,6 +12,7 @@ sub new {
 
     $self->{dbh} = $args{dbh};
     $self->{use_new_neighbor_method} = exists $args{use_nnm} ? $args{use_nnm} : 1;
+    $self->{anno} = $args{efi_anno};
     
     return bless($self, $class);
 }
@@ -143,7 +144,7 @@ SQL
 
     my $colSql = join(", ", 
             "ena.ID as ID", "ena.AC as AC", "ena.NUM as NUM", "ena.TYPE as TYPE", "ena.DIRECTION as DIRECTION", "ena.start as start", "ena.stop as stop",
-            "annotations.organism as strain",
+            "annotations.metadata as metadata",
             "group_concat(PFAM.id) as pfam_fam",
             "group_concat(I.id) as ipro_fam",
             "group_concat(I.family_type) as ipro_type",
@@ -176,7 +177,8 @@ SQL
     my $acc_start = int($row->{start});
     my $acc_stop = int($row->{stop});
     my $acc_seq_len = int(abs($acc_stop - $acc_start) / 3 - 1);
-    my $acc_strain = $row->{strain};
+    my $md = $self->{anno}->decode_meta_struct($row->{metadata});
+    my $acc_strain = $md->{strain};
     
     $low=$num-$neighborhoodSize;
     $high=$num+$neighborhoodSize;

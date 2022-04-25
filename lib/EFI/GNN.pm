@@ -112,7 +112,7 @@ sub getPdbInfo{
             $metadata = $self->{efi_anno}->decode_meta_struct($meta);
         }
         my $pdbNumber = $metadata->{pdb} ? $metadata->{pdb} : "";
-        
+
         if ($status eq "SwissProt") {
             $reviewedCount++;
         }
@@ -230,7 +230,6 @@ sub getClusterHubData {
     my $neighborhoodSize = shift;
     my $warning_fh = shift;
     my $useCircTest = shift;
-    #my $extras = shift || {};
 
     my $supernodeOrder = $self->{network}->{cluster_order};
 
@@ -246,27 +245,19 @@ sub getClusterHubData {
     # This is used to retain the order of the nodes in the xgmml file when we write the arrow sqlite database.
     my $sortKey = 0;
 
-    my $nbFind = new EFI::GNN::NeighborUtil(dbh => $self->{dbh}, use_nnm => $self->{use_new_neighbor_method});
+    my $nbFind = new EFI::GNN::NeighborUtil(dbh => $self->{dbh}, use_nnm => $self->{use_new_neighbor_method}, efi_anno => $self->{efi_anno});
 
-    #my $extraCache = {};
     foreach my $clusterId (@{ $supernodeOrder }) {
         $noneFamily{$clusterId} = {};
         my $nodeIds = $self->getIdsInCluster($clusterId, ALL_IDS|NO_DOMAIN|INTERNAL);
         my $clusterNum = $self->getClusterNumber($clusterId);
-        print STDERR "CID: $clusterId $clusterNum\n";
 
-        #foreach my $accession (@$nodeIds, @{$extras->{$clusterId}}) {
         foreach my $accession (@$nodeIds) {
-            # This is exclusively for retrieving data for UniRef seed sequences.  It won't work properly
-            # for any other purpose.
-            #next if $extraCache->{$accession};
-            #$extraCache->{$accession} = 
             (my $accNoDomain = $accession) =~ s/:\d+:\d+$//;
             $accession = $accNoDomain;
             $accessionData{$accession}->{neighbors} = [];
             my ($pfamsearch, $iprosearch, $localNoMatch, $localNoNeighbors, $genomeId) =
                 $nbFind->findNeighbors($accNoDomain, $neighborhoodSize, $warning_fh, $useCircTest, $noneFamily{$clusterId}, $accessionData{$accession});
-####            $self->{NCACHE}->{$accession} = [$pfamsearch, $iprosearch] if not $self->{NCACHE}->{$accession};
             $noNeighbors{$accession} = $localNoNeighbors;
             $genomeIds{$accession} = $genomeId;
             $noMatches{$accession} = $localNoMatch;

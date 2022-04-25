@@ -242,6 +242,7 @@ if ($fileSize) {
     $fileSize = $fileSize / 1024 / 1024; # MB
     $ramReservation = $ramPredictionM * $fileSize + $ramSafety;
     $ramReservation = int($ramReservation + 0.5);
+    $ramReservation = 1000 if $ramReservation > 1000;
 }
 
 my $schedType = "torque";
@@ -414,7 +415,7 @@ $B->addAction("module load $gntModule");
 $B->addAction("cd $outputPath");
 $B->addAction("$gntPath/unzip_file.pl -in $ssnInZip -out $ssnIn") if $ssnInZip =~ /\.zip/i;
 #TODO: remove this hack
-$B->addAction("/home/n-z/noberg/dev/EST/fix_xgmml.pl --input $ssnIn --rename");
+#$B->addAction("/home/n-z/noberg/dev/EST/fix_xgmml.pl --input $ssnIn --rename");
 $B->addAction("$gntPath/cluster_gnn.pl $scriptArgs");
 EFI::GNN::Base::addFileActions($B, $fileInfo, $skipFasta);
 if (not $optMsaOption) {

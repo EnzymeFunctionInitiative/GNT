@@ -18,6 +18,7 @@ use EFI::GNN::Arrows;
 
 my ($diagramZipFile, $blastSeq, $evalue, $maxNumSeq, $outputFile, $scheduler, $queue, $dryRun,
     $legacy, $title, $nbSize, $idFile, $jobType, $fastaFile, $jobId, $seqDbType, $reverseUniRef);
+my ($taxFile, $taxTreeId, $taxIdType);
 my $result = GetOptions(
     "zip-file=s"            => \$diagramZipFile,
 
@@ -28,6 +29,10 @@ my $result = GetOptions(
 
     "id-file=s"             => \$idFile,
     "fasta-file=s"          => \$fastaFile,
+
+    "tax-file=s"            => \$taxFile,
+    "tax-tree-id=s"         => \$taxTreeId,
+    "tax-id-type=s"         => \$taxIdType,
 
     "output=s"              => \$outputFile,
     "title=s"               => \$title,
@@ -46,16 +51,26 @@ my $usage = <<USAGE
 usage: $0 --diagram-file <filename> --zip-file <filename> [--zip-file <filename> OR
     --blast <seq_or_file> OR --id-file <filename> OR --fasta-file <filename>]
 
+    # Mode 1
     --zip-file          the zip'ed file to unzip to a SQLite file (simple unzip job submit)
 
+    # Mode 2
     --blast             the sequence for Option A, which uses BLAST to get similar sequences
     --evalue            the evalue to use for BLAST
     --max-seq           the maximum number of sequences to return from the BLAST
     --nb-size           the neighborhood window on either side of the query sequence
 
+    # Mode 3
     --id-file           file containing a list of IDs to use to generate the diagrams
+
+    # Mode 4 (works like Mode 3)
     --fasta-file        file containing FASTA sequences with headers; we extract the IDs from
                         the headers and use those IDs to generate the diagrams
+
+    # Mode 5
+    --tax-file          path to the taxonomy json file
+    --tax-tree-id       node ID
+    --tax-id-type       ID type to use (uniprot|uniref90|uniref50)
 
     --output            output sqlite file for Options A-D
     --title             the job title to save in the output file
@@ -75,7 +90,7 @@ USAGE
 my $diagramVersion = $EFI::GNN::Arrows::Version;
 
 
-if (not -f $diagramZipFile and not $blastSeq and not -f $idFile and not -f $fastaFile) {
+if (not -f $diagramZipFile and not $blastSeq and not -f $idFile and not -f $fastaFile and not -f $taxFile) {
     die "$usage";
 }
 
@@ -175,11 +190,14 @@ if ($blastSeq) {
     addBashErrorCheck($B, 1, $outputFile);
 }
 
-elsif ($idFile) {
+elsif ($idFile or ($taxFile and defined $taxTreeId and $taxIdType)) {
     $jobType = "ID_LOOKUP" if not $jobType;
 
-    $B->resource(1, 1, "10gb");
-#    $B->addAction("create_diagram_db.pl -id-file $idFile -db-file $outputFile -job-type $jobType $titleArg -nb-size $nbSize -do-id-mapping");
+    $B->resource(1, 1, "15gb");
+    if ($taxFile and defined $taxTreeId and $taxIdType) {
+        $idFile = "$outputDir/ids_from_tax_tree.txt";
+        $B->addAction("extract_taxonomy_tree.pl --json-file $taxFile --output-file $idFile --id-type $taxIdType --tree-id $taxTreeId");
+    }
     outputCreateScript($idFile, $jobType, "--do-id-mapping");
     $B->addAction("echo $diagramVersion > $outputDir/diagram.version");
 

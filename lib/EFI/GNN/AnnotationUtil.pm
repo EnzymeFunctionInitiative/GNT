@@ -4,8 +4,6 @@ package EFI::GNN::AnnotationUtil;
 use warnings;
 use strict;
 
-use Data::Dumper;
-
 
 sub new {
     my ($class, %args) = @_;

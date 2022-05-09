@@ -252,6 +252,7 @@ sub writeSequence {
             if ($legacyAnno) {
                 $organism = $row->{organism};
             } else {
+                print "WARNING: missing metadata for $accession; is entry obsolete? [F]\n" if not $row->{metadata};
                 my $struct = $anno->decode_meta_struct($row->{metadata});
                 $organism = $struct->{organism};
             }

@@ -780,6 +780,7 @@ sub getSharedClusterToIdMapping {
                         if ($legacyAnno) {
                             $descVal = $row->{swissprot_description};
                         } else {
+                            print "WARNING: missing metadata for $proteinId; is entry obsolete? [3]\n" if not $row->{metadata};
                             my $struct = $anno->decode_meta_struct($row->{metadata});
                             $descVal = $row->{swissprot_status} ? ($struct->{description} // "NA") : "NA";
                             #TODO: fix this after 202203 release
@@ -819,6 +820,7 @@ sub getSharedClusterToIdMapping {
                     if ($legacyAnno) {
                         $descVal = $row->{swissprot_description};
                     } else {
+                        print "WARNING: missing metadata for $proteinId; is entry obsolete? [4]\n" if not $row->{metadata};
                         my $struct = $anno->decode_meta_struct($row->{metadata});
                         $descVal = $row->{swissprot_status} ? ($struct->{description} // "NA") : "NA";
                         #todo: FIX THIS After 202203 release

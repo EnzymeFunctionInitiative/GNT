@@ -437,7 +437,7 @@ if ($optMsaOption) {
     $B->jobName($jobName);
     $B->renderToFile($jobScript);
     $jobId = $SS->submit($jobScript);
-    print "HMM and stuff job is:\n $jobId";
+    print "\nHMM and stuff job is:\n $jobId";
 }
 
 if ($cleanup) {

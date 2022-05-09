@@ -109,6 +109,7 @@ sub getPdbInfo{
         my $metadata = $attribResults;
         if (not $self->{anno}) {
             my $meta = $attribResults->{metadata};
+            print "WARNING: missing metadata for $accession; is entry obsolete? [1]\n" if not $row->{metadata};
             $metadata = $self->{efi_anno}->decode_meta_struct($meta);
         }
         my $pdbNumber = $metadata->{pdb} ? $metadata->{pdb} : "";

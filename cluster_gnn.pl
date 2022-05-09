@@ -318,7 +318,7 @@ if (not $skipIdMapping) {
     my ($result, $uniProtUniRefMap, $uniProtClusterMap, $spDesc) = doClusterMapping($dbh, $util, $ssnType, $efiRefMap, $lookupSwissprot);
     $allSwissprotDesc = $spDesc;
     $hasDomain = $result->{has_domain};
-    saveClusterNumMap($clusterNumMapFile, $result->{sizes}) if $result->{sizes};
+    saveClusterNumMap($clusterNumMapFile, $result->{sizes}) if $result->{sizes} and $clusterNumMapFile;
     saveClusterSizes($clusterSizeFile, $result->{sizes}) if $result->{sizes};
     $uniProtUniRefIdMap = $uniProtUniRefMap;
     if ($efiRefVer) {

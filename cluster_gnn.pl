@@ -61,7 +61,6 @@ my ($ssnin, $neighborhoodSize, $warningFile, $gnn, $ssnout, $cooccurrence, $stat
     $outputDir, $excludeFragments, $extraSeqFile, $convRatioFile,
     $useUniRef, $efiRefVer, $efiRefDb, $efiRef50IdDir, $efiRef70IdDir,
 );
-my $legacyAnno; # Remove the legacy after summer 2022
 
 my $result = GetOptions(
     "output-dir=s"          => \$outputDir,
@@ -109,7 +108,6 @@ my $result = GetOptions(
     "efiref-70-dir=s"       => \$efiRef70IdDir,
     "conv-ratio=s"          => \$convRatioFile,
     "debug"                 => \$debug,
-    "legacy-anno"           => \$legacyAnno,
 );
 
 my $usage = <<USAGE
@@ -740,19 +738,14 @@ sub getSharedClusterToIdMapping {
     my $swissprot = {};
 
     # Remove the legacy after summer 2022
-    my $spCol = $legacyAnno ? "SwissProt_Description AS swissprot_description" : "swissprot_description";
-    my $spStatusCol = $legacyAnno ? "STATUS AS swissprot_status" : "swissprot_status";
-    my $fragCol = $legacyAnno ? "Fragment AS is_fragment" : "is_fragment";
+    my $spCol = "swissprot_description";
+    my $spStatusCol = "swissprot_status";
+    my $fragCol = "is_fragment";
     my $swissprotSql = "";
     my $swissprotSqlCol = "";
     if ($lookupSwissprot or $excludeFragments) {
         $swissprotSql = "LEFT JOIN annotations AS A ON U.accession = A.accession";
-        if ($legacyAnno) {
-            $swissprotSqlCol = ", A.$spCol";
-        } else {
-            $swissprotSqlCol = ", A.metadata";
-        }
-        $swissprotSqlCol .= ", A.$spStatusCol";
+        $swissprotSqlCol = ", A.metadata, A.$spStatusCol";
     }
     my $baseSql = "SELECT U.* $swissprotSqlCol FROM uniref AS U $swissprotSql";
 
@@ -777,16 +770,12 @@ sub getSharedClusterToIdMapping {
                 while (my $row = $sth->fetchrow_hashref) {
                     if ($lookupSwissprot) {
                         my $descVal = "";
-                        if ($legacyAnno) {
-                            $descVal = $row->{swissprot_description};
-                        } else {
-                            print "WARNING: missing metadata for $proteinId; is entry obsolete? [3]\n" if not $row->{metadata};
-                            my $struct = $anno->decode_meta_struct($row->{metadata});
-                            $descVal = $row->{swissprot_status} ? ($struct->{description} // "NA") : "NA";
-                            #TODO: fix this after 202203 release
-                            $descVal =~ s/(Short|Flags|AltName|RecName)[:=].*$//;
-                            $descVal =~ s/;?\s*$//;
-                        }
+                        print "WARNING: missing metadata for $proteinId; is entry obsolete? [3]\n" if not $row->{metadata};
+                        my $struct = $anno->decode_meta_struct($row->{metadata});
+                        $descVal = $row->{swissprot_status} ? ($struct->{description} // "NA") : "NA";
+                        #TODO: fix this after 202203 release
+                        $descVal =~ s/(Short|Flags|AltName|RecName)[:=].*$//;
+                        $descVal =~ s/;?\s*$//;
                         push @{$swissprot->{$proteinId}}, $descVal;
                     }
                     $uniref50IdsClusterMap{$row->{uniref50_seed}} = $clNum if $ssnSeqSource < 90;
@@ -809,24 +798,17 @@ sub getSharedClusterToIdMapping {
             }
             if (not $ssnSeqSource and $lookupSwissprot) {
                 my $sql = "SELECT metadata FROM annotations WHERE accession = '$proteinId'";
-                if ($legacyAnno) {
-                    $sql = "SELECT $spCol FROM annotations WHERE accession = '$proteinId'";
-                }
 #                print "UP SP $sql\n";
                 my $sth = $dbh->prepare($sql);
                 $sth->execute;
                 while (my $row = $sth->fetchrow_hashref) {
                     my $descVal = "";
-                    if ($legacyAnno) {
-                        $descVal = $row->{swissprot_description};
-                    } else {
-                        print "WARNING: missing metadata for $proteinId; is entry obsolete? [4]\n" if not $row->{metadata};
-                        my $struct = $anno->decode_meta_struct($row->{metadata});
-                        $descVal = $row->{swissprot_status} ? ($struct->{description} // "NA") : "NA";
-                        #todo: FIX THIS After 202203 release
-                        $descVal =~ s/(Short|Flags|AltName|RecName)[:=].*$//;
-                        $descVal =~ s/;?\s*$//;
-                    }
+                    print "WARNING: missing metadata for $proteinId; is entry obsolete? [4]\n" if not $row->{metadata};
+                    my $struct = $anno->decode_meta_struct($row->{metadata});
+                    $descVal = $row->{swissprot_status} ? ($struct->{description} // "NA") : "NA";
+                    #todo: FIX THIS After 202203 release
+                    $descVal =~ s/(Short|Flags|AltName|RecName)[:=].*$//;
+                    $descVal =~ s/;?\s*$//;
                     push @{$swissprot->{$proteinId}}, $row->{swissprot_description};
                 }
             }

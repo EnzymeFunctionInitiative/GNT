@@ -1,8 +1,8 @@
 #!/usr/bin/env perl
 
 BEGIN {
-    die "Please load efishared before runing this script" if not $ENV{EFISHARED};
-    use lib $ENV{EFISHARED};
+    die "Please load efishared before runing this script" if not $ENV{EFI_SHARED};
+    use lib $ENV{EFI_SHARED};
 }
 
 
@@ -43,7 +43,7 @@ die "No --uniprot-ids file provided\n$usage" if not $uniprotFile or not -f $unip
 die "No --uniref-mapping file provided\n$usage" if not $outFile;
 #die "No --uniref50 file provided\n$usage" if not $uniref50File;
 #die "No --uniref90 file provided\n$usage" if not $uniref90File;
-die "No configuration file found in environment or as argument: \n$usage" if (not $configFile or -f $configFile) and not exists $ENV{EFI_CONFIG} and not -f $ENV{EFI_CONFIG};
+die "No configuration file found in environment or as argument: \n$usage" if (not $configFile and not $ENV{EFI_CONFIG}) or ($configFile and not -f $configFile) or ($ENV{EFI_CONFIG} and not -f $ENV{EFI_CONFIG});
 
 $configFile = $ENV{EFI_CONFIG} if not $configFile or not -f $configFile;
 
@@ -154,7 +154,8 @@ sub getUniRefSeedIds {
 sub getUniRefSeedIds2 {
     my $dbh = shift;
     my @ids = @_;
-    my %ids = map { (split(m/\t/, $_))[1] => 1 } @ids;
+    my %ids;
+    map { my @a = split(m/\t/, $_); $ids{$a[$#a]} = 1; } @ids;
 
     my @map;
     my (%ur50, %ur90);

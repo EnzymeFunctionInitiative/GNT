@@ -366,7 +366,7 @@ if ($optMsaOption) {
     $fileInfo->{hmm_amino_acids} = [split(m/,/, $optAaList)];
     my @colors = ("red", "blue", "orange", "DarkGreen", "Magenta", "Gray");
     $fileInfo->{hmm_weblogo_colors} = \@colors;
-    $fileInfo->{hmm_max_seq_msa} = $optMaxSeqMsa // 0;
+    $fileInfo->{hmm_max_seq_msa} = $optMaxSeqMsa // 700;
 
     $optMinSeqMsa = ($optMinSeqMsa and $optMinSeqMsa >= 1) ? $optMinSeqMsa : 5;
     $fileInfo->{hmm_min_seq_msa} = $optMinSeqMsa;

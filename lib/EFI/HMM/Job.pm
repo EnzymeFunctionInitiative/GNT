@@ -64,6 +64,7 @@ sub makeJob {
     my $fullCountFile = "$fullOutDir/cluster_node_counts.txt";
     my $domCountFile = "$domOutDir/cluster_node_counts.txt";
     my $domainMapFile = "$outputPath/$info->{domain_map_file}";
+    my $mapFile = "$outputPath/$info->{map_file}";
     
     my $zipPrefix = $info->{hmm_zip_prefix};
 
@@ -215,7 +216,7 @@ SCRIPT
     #CONSENSUS RESIDUE CALCULATION
     $appDir/count_msa_aa.pl --msa-dir $fullAlignDir --logo-dir $fullOutDir/weblogo --aa $aa --count-file $consDir/${baseFile}_position.txt --pct-file $consDir/${baseFile}_percentage.txt --threshold $ct --node-count-file $fullCountFile
     mkdir -p $listDir
-    $appDir/collect_aa_ids.pl --aa-count-file $consDir/${baseFile}_position.txt --output-dir $listDir --id-mapping $domainMapFile
+    $appDir/collect_aa_ids.pl --aa-count-file $consDir/${baseFile}_position.txt --output-dir $listDir --id-mapping $mapFile
 SCRIPT
                 );
                 $mergeCounts .= " --position-file $ct=$consDir/${baseFile}_position.txt";

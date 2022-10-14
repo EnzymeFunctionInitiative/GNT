@@ -174,7 +174,7 @@ sub getNodes {
         #for efiest generated networks the key is the accession and it equals an accession, no harm, no foul
         $idMap->{$nodeId}= $nodeLabel;
 
-        push @{$metanodeMap->{$nodeLabel}}, $proteinId;
+        $metanodeMap->{$nodeLabel}->{$proteinId} = 1;
         $nodeMap->{$nodeLabel} = $node;
         
         my @annotations=$node->findnodes('./*');
@@ -187,7 +187,7 @@ sub getNodes {
                     #make sure all accessions within the node are included in the gnn network
                     my $attrAcc = $accessionlist->getAttribute('value');
                     print "Expanded $nodeLabel into $attrAcc\n" if $self->{debug};
-                    push @{$metanodeMap->{$nodeLabel}}, $attrAcc if $noDomain ne $attrAcc;
+                    $metanodeMap->{$nodeLabel}->{$attrAcc} = 1 if $noDomain ne $attrAcc;
                 }
             } elsif ($checkUniref and $attrName =~ m/UniRef(\d+)/) {
                 $self->{has_uniref} = "UniRef$1";
@@ -221,7 +221,14 @@ sub getNodes {
         }
     }
 
-    $self->{network}->{metanode_map} = $metanodeMap;
+    my $mmap = {};
+    foreach my $node (keys %$metanodeMap) {
+        foreach my $subNode (keys %{ $metanodeMap->{$node} }) {
+            push @{ $mmap->{$node} }, $subNode;
+        }
+    }
+
+    $self->{network}->{metanode_map} = $mmap;
     $self->{network}->{id_label_map} = $idMap;
     $self->{network}->{id_obj_map} = $nodeMap;
     $self->{network}->{metanode_cluster_map} = $clusterNumMap;

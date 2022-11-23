@@ -236,7 +236,7 @@ if ($ssnInZip !~ m/\.zip/) { # If it's a .zip we can't predict apriori what the 
 
 # Y = MX+B, M=emperically determined, B = safety factor; X = file size in MB; Y = RAM reservation in GB
 my $ramReservation = defined $extraRam ? (length $extraRam ? $extraRam : 800) : 150;
-if ($fileSize) {
+if (!$extraRam && $fileSize) {
     my $ramPredictionM = 0.02;
     my $ramSafety = 10;
     $fileSize = $fileSize / 1024 / 1024; # MB

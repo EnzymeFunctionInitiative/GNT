@@ -70,17 +70,16 @@ usage: $0 -id-file <input_file> -db-file <output_file> [-no-match-file <output_f
 USAGE
 
 
-die "Invalid -id-file provided: \n$usage" if not -f $idListFile;
-die "No -db-file provided: \n$usage" if not $dbFile;
-die "No configuration file found in environment or as argument: \n$usage" if not -f $configFile and not exists $ENV{EFI_CONFIG} and not -f $ENV{EFI_CONFIG};
+die "Invalid --id-file provided: \n$usage" if not $idListFile or not -f $idListFile;
+die "No --db-file provided: \n$usage" if not $dbFile;
+die "No configuration file found in environment or as argument: \n$usage" if (not $configFile or not -f $configFile) and not exists $ENV{EFI_CONFIG} and not -f $ENV{EFI_CONFIG};
 
-$configFile = $ENV{EFI_CONFIG} if not -f $configFile;
+$configFile = $ENV{EFI_CONFIG} if not $configFile or not -f $configFile;
 
 $nbSize = $defaultNbSize if not $nbSize;
 $title = "" if not $title;
 $blastSeq = "" if not $blastSeq;
 $jobType = "" if not $jobType;
-$uniRefVersion = 0 if not defined $uniRefVersion;
 
 my %dbArgs;
 $dbArgs{config_file_path} = $configFile;

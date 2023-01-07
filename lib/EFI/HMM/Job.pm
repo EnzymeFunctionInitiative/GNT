@@ -66,7 +66,9 @@ sub makeJob {
     my $domainMapFile = "$outputPath/$info->{domain_map_file}";
     my $mapFile = "$outputPath/$info->{map_file}";
     
-    my $zipPrefix = $info->{hmm_zip_prefix};
+    my $zipPrefix = $info->{hmm_zip_prefix} ? $info->{hmm_zip_prefix} . "_" : "";
+
+    my $weblogoApp = $info->{weblogo_path};
 
     my $zipFiles = {};
 
@@ -76,21 +78,23 @@ sub makeJob {
     $B->dependency(0, $depJobId);
     $B->setScriptAbortOnError(0); # don't abort on error
 
-    my $clustalModule = $doPim ? "module load Clustal-Omega/1.2.4-IGB-gcc-4.9.4" : "";
+    my $clustalModule = $doPim ? "module load Clustal-Omega/1.2.4-IGB-gcc-8.2.0" : "";
     #find DIR -type f -print0 | sed 's%/private_stores/gerlt/efi_test/results/14137/output/cluster-data/hmm/domain/align/%%g' | sed 's/\.afa//g' | xargs -n 1 -P 12  -0 -I % echo weblogo -D fasta -F png --resolution 300 --stacks-per-line 80 -f /private_stores/gerlt/efi_test/results/14137/output/cluster-data/hmm/domain/align/%.afa -o ~/junk/t/weblogo/%.png
     $B->addAction(<<SCRIPT
 source /etc/profile
 module purge
-module load MUSCLE/3.8.31-IGB-gcc-4.9.4
-module load Python/3.6.1-IGB-gcc-4.9.4
-module load GhostScript/9.21-IGB-gcc-4.9.4
-module load HMMER/3.2.1-IGB-gcc-4.9.4
-module load skylign/1.1-IGB-gcc-4.9.4-Perl-5.24.1
-module load R/3.3.3-IGB-gcc-4.9.4
-module load CD-HIT/4.6.6-IGB-gcc-4.9.4
+module load $info->{gnt_module}
+module load MUSCLE/3.8.31-IGB-gcc-8.2.0
+module load Python/3.7.2-IGB-gcc-8.2.0
+module load GhostScript/9.55.0-IGB-gcc-8.2.0
+module load HMMER/3.3.1-IGB-gcc-8.2.0
+module load skylign/1.1-IGB-gcc-8.2.0-Perl-5.28.1
+module load R/3.6.0-IGB-gcc-8.2.0
+module load CD-HIT/4.8.1-IGB-gcc-8.2.0
 $clustalModule
+source $info->{extra_perl}
 
-export PYTHONPATH=\$PYTHONPATH:/home/n-z/noberg/lib/python
+export PYTHONPATH=\$PYTHONPATH:$info->{weblogo_lib}
 export PATH=\$PATH:/home/n-z/noberg/bin
 if [[ -d $fastaDir ]]; then
 SCRIPT
@@ -121,7 +125,7 @@ SCRIPT
             );
         }
 
-        my $zipFilename= "${zipPrefix}_MSAs_Full.zip";
+        my $zipFilename= "${zipPrefix}MSAs_Full.zip";
         my $zipFile = "$outputPath/$zipFilename";
         $B->addAction(<<SCRIPT
 
@@ -143,7 +147,7 @@ SCRIPT
             );
         }
         if ($doPim) {
-            my $pimZipFilename= "${zipPrefix}_PIMs_Full.zip";
+            my $pimZipFilename= "${zipPrefix}PIMs_Full.zip";
             my $pimZipFile = "$outputPath/$pimZipFilename";
             $B->addAction(<<SCRIPT
     mkdir -p $fullPimDir
@@ -167,7 +171,7 @@ SCRIPT
 
     ########## FULL - HMM
     if ($hmmOption =~ m/HMM/i) {
-        my $zipFilename = "${zipPrefix}_HMMs_Full.zip";
+        my $zipFilename = "${zipPrefix}HMMs_Full.zip";
         my $zipFile = "$outputPath/$zipFilename";
         $B->addAction(<<SCRIPT
     mkdir -p $fullOutDir/hmm
@@ -185,12 +189,12 @@ SCRIPT
 
     ########## FULL - CONSENSUS RESIDUE OR WEBLOGO
     if ($hmmOption =~ m/CR|WEBLOGO/i) {
-        my $zipFilename= "${zipPrefix}_WebLogos_Full.zip";
+        my $zipFilename= "${zipPrefix}WebLogos_Full.zip";
         my $zipFile = "$outputPath/$zipFilename";
         $B->addAction(<<SCRIPT
     mkdir -p $fullOutDir/weblogo
-    cat $fullClusterListFile | xargs -P $np -I % weblogo -D fasta -F png --resolution 300 --stacks-per-line 80 -f $fullAlignDir/cluster_%.afa -o $fullOutDir/weblogo/cluster_%.png $colorList
-    cat $fullClusterListFile | xargs -P $np -I % weblogo -D fasta -F logodata -f $fullAlignDir/cluster_%.afa -o $fullOutDir/weblogo/cluster_%.txt
+    cat $fullClusterListFile | xargs -P $np -I % $weblogoApp -D fasta -F png --resolution 300 --stacks-per-line 80 -f $fullAlignDir/cluster_%.afa -o $fullOutDir/weblogo/cluster_%.png $colorList
+    cat $fullClusterListFile | xargs -P $np -I % $weblogoApp -D fasta -F logodata -f $fullAlignDir/cluster_%.afa -o $fullOutDir/weblogo/cluster_%.txt
     find $fullOutDir/weblogo -name 'cluster_*.png' -type f | sed 's%$fullOutDir/weblogo/\\(cluster_\\([0-9]\\+\\)\\)\\.png%\\2\\tfull\\tnormal\\t$hmmRelPath/full/normal/weblogo/\\1%g' > $weblogoListFile
     DIR=`pwd`
     cd $fullOutDir/weblogo && zip -r $zipFile . -i '*.png'
@@ -204,7 +208,7 @@ SCRIPT
     if ($hmmOption =~ m/CR/i) {
         foreach my $aa (@aas) {
             my $consDir = "$fullOutDir/consensus_residue_results_$aa";
-            my $consZipName = "${zipPrefix}_ConsensusResidue_${aa}_Full.zip";
+            my $consZipName = "${zipPrefix}ConsensusResidue_${aa}_Full.zip";
             my $consZip = "$outputPath/$consZipName";
             $B->addAction("    mkdir -p $consDir");
             my $mergeCounts = "";
@@ -222,7 +226,7 @@ SCRIPT
                 $mergeCounts .= " --position-file $ct=$consDir/${baseFile}_position.txt";
                 $mergePercent .= " --percentage-file $ct=$consDir/${baseFile}_percentage.txt";
             }
-            my $outBaseName = "${zipPrefix}_ConsensusResidue_${aa}";
+            my $outBaseName = "${zipPrefix}ConsensusResidue_${aa}";
             my $posSumFileName = "${outBaseName}_Position_Summary_Full.txt";
             my $pctSumFileName = "${outBaseName}_Percentage_Summary_Full.txt";
             $B->addAction(<<SCRIPT
@@ -241,7 +245,7 @@ SCRIPT
 
     ########## FULL - LENGTH HISTOGRAM
     if ($hmmOption =~ m/HIST/i) {
-        my $zipFilename= "${zipPrefix}_LenHist_UniProt_Full.zip";
+        my $zipFilename= "${zipPrefix}LenHist_UniProt_Full.zip";
         my $zipFile = "$outputPath/$zipFilename";
         my $outDir = "$fullOutDir/hist-uniprot";
         $B->addAction(<<SCRIPT
@@ -258,7 +262,7 @@ SCRIPT
             my $dirs = shift;
             my $urType = shift;
             my $fileType = lc($urType);
-            my $zipFilename= "${zipPrefix}_LenHist_${urType}_Full.zip";
+            my $zipFilename= "${zipPrefix}LenHist_${urType}_Full.zip";
             my $zipFile = "$outputPath/$zipFilename";
             my $outDir = "$fullOutDir/hist-$fileType";
             $B->addAction(<<SCRIPT
@@ -304,7 +308,7 @@ SCRIPT
 
     ########## DOMAIN - MSA
     if ($hmmOption =~ m/HMM|CR|WEBLOGO/) {
-        my $msaZipFilename = "${zipPrefix}_WebLogos_Full.zip";
+        my $msaZipFilename = "${zipPrefix}WebLogos_Full.zip";
         my $msaZip = "$outputPath/$msaZipFilename";
         $B->addAction(<<SCRIPT
     mkdir -p $domAlignDir
@@ -329,7 +333,7 @@ SCRIPT
             );
         }
 
-        my $zipFilename= "${zipPrefix}_MSAs_Domain.zip";
+        my $zipFilename= "${zipPrefix}MSAs_Domain.zip";
         my $zipFile = "$outputPath/$zipFilename";
         $B->addAction(<<SCRIPT
 
@@ -362,13 +366,13 @@ SCRIPT
 
     ########## DOMAIN - CONSENSUS RESIDUE OR WEBLOGO
     if ($hmmOption =~ m/CR|WEBLOGO/i) {
-        my $zipFilename= "${zipPrefix}_WebLogos_Domain.zip";
+        my $zipFilename= "${zipPrefix}WebLogos_Domain.zip";
         my $zipFile = "$outputPath/$zipFilename";
         $B->addAction(<<SCRIPT
     #MAKE WEBLOGOs
     mkdir -p $domOutDir/weblogo
-    cat $domClusterListFile | xargs -P $np -I % weblogo -D fasta -F png --resolution 300 --stacks-per-line 80 -f $domAlignDir/cluster_domain_%.afa -o $domOutDir/weblogo/cluster_domain_%.png $colorList
-    cat $domClusterListFile | xargs -P $np -I % weblogo -D fasta -F logodata -f $domAlignDir/cluster_domain_%.afa -o $domOutDir/weblogo/cluster_domain_%.txt
+    cat $domClusterListFile | xargs -P $np -I % $weblogoApp -D fasta -F png --resolution 300 --stacks-per-line 80 -f $domAlignDir/cluster_domain_%.afa -o $domOutDir/weblogo/cluster_domain_%.png $colorList
+    cat $domClusterListFile | xargs -P $np -I % $weblogoApp -D fasta -F logodata -f $domAlignDir/cluster_domain_%.afa -o $domOutDir/weblogo/cluster_domain_%.txt
     find $domOutDir/weblogo -name 'cluster_*.png' -type f | sed 's%$domOutDir/weblogo/\\(cluster_\\(domain\\)\\?_\\?\\([0-9]\\+\\)\\)\\.png%\\3\\t\\2\\tnormal\\t$hmmRelPath/domain/weblogo/\\1%g' >> $weblogoListFile
     DIR=`pwd`
     cd $domOutDir/weblogo && zip -r $zipFile . -i '*.png'
@@ -380,7 +384,7 @@ SCRIPT
 
     ########## DOMAIN - HMM
     if ($hmmOption =~ m/HMM/i) {
-        my $zipFilename = "${zipPrefix}_HMMs_Domain.zip";
+        my $zipFilename = "${zipPrefix}HMMs_Domain.zip";
         my $zipFile = "$outputPath/$zipFilename";
         foreach my $type (@types) {
             my $typeDir = "$domOutDir/hmm";
@@ -403,7 +407,7 @@ SCRIPT
     if ($hmmOption =~ m/CR/i) {
         foreach my $aa (@aas) {
             my $consDir = "$domOutDir/consensus_residue_results_$aa";
-            my $consZipName = "${zipPrefix}_ConsensusResidue_${aa}_Domain.zip";
+            my $consZipName = "${zipPrefix}ConsensusResidue_${aa}_Domain.zip";
             my $consZip = "$outputPath/$consZipName";
             $B->addAction("    mkdir -p $consDir");
             my $mergeCounts = "";
@@ -421,7 +425,7 @@ SCRIPT
                 $mergeCounts .= " --position-file $ct=$consDir/${baseFile}_position.txt";
                 $mergePercent .= " --percentage-file $ct=$consDir/${baseFile}_percentage.txt";
             }
-            my $outBaseName = "${zipPrefix}_ConsensusResidue_${aa}";
+            my $outBaseName = "${zipPrefix}ConsensusResidue_${aa}";
             my $posSumFileName = "${outBaseName}_Position_Summary_Domain.txt";
             my $pctSumFileName = "${outBaseName}_Percentage_Summary_Domain.txt";
             $B->addAction(<<SCRIPT
@@ -444,7 +448,7 @@ SCRIPT
             my $dirs = shift;
             my $urType = shift;
             my $fileType = lc($urType);
-            my $zipFilename= "${zipPrefix}_LenHist_${fileType}_Domain.zip";
+            my $zipFilename= "${zipPrefix}LenHist_${fileType}_Domain.zip";
             my $zipFile = "$outputPath/$zipFilename";
             my $outDir = "$domOutDir/hist-$fileType";
             $B->addAction(<<SCRIPT

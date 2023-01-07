@@ -8,7 +8,7 @@ BEGIN {
 use strict;
 
 use FindBin;
-use Getopt::Long;
+use Getopt::Long qw(:config pass_through);
 use lib $FindBin::Bin . "/lib";
 
 use EFI::SchedulerApi;

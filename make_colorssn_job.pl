@@ -8,8 +8,9 @@ BEGIN {
 use strict;
 use warnings;
 
-use Getopt::Long;
+use Getopt::Long qw(:config pass_through);
 use FindBin;
+use File::Basename;
 use lib $FindBin::Bin . "/lib";
 
 use EFI::Database;
@@ -20,7 +21,7 @@ use EFI::GNN::Base;
 use EFI::HMM::Job;
 
 
-my ($ssnIn, $nbSize, $ssnOut, $cooc, $outputDir, $scheduler, $dryRun, $queue, $jobId);
+my ($ssnIn, $nbSize, $ssnOut, $cooc, $resultsDirName, $scheduler, $dryRun, $queue, $jobId, $jobDir);
 my ($statsFile, $clusterSizeFile, $clusterNumMapFile, $swissprotClustersDescFile, $swissprotSinglesDescFile);
 my ($jobConfigFile, $domainMapFileName, $mapFileName, $extraRam, $cleanup);
 my ($optMsaOption, $optAaThreshold, $optAaList, $optMinSeqMsa, $optMaxSeqMsa);
@@ -28,7 +29,8 @@ my ($efiRefVer, $efiRefDb, $skipFasta, $convRatioFile);
 my $result = GetOptions(
     "ssn-in=s"                  => \$ssnIn,
     "ssn-out=s"                 => \$ssnOut,
-    "out-dir=s"                 => \$outputDir,
+    "results-dir-name=s"        => \$resultsDirName, # name of results sub dir
+    "job-dir=s"                 => \$jobDir,
     "scheduler=s"               => \$scheduler,
     "dry-run"                   => \$dryRun,
     "queue=s"                   => \$queue,
@@ -84,6 +86,7 @@ USAGE
 my $dbModule = $ENV{EFIDBMOD};
 my $gntPath = $ENV{EFIGNN};
 my $gntModule = $ENV{EFIGNNMOD};
+my $extraPerl = "$ENV{EFI_PERL_ENV}";
 
 #my $JC = LoadJobConfig($jobConfigFile, getDefaults());
 
@@ -102,18 +105,20 @@ die "$usage\nERROR: missing -queue parameter" if not $queue;
 
 
 
+$jobDir = $ENV{PWD} if not $jobDir;
+$resultsDirName = "output" if not $resultsDirName;
+my $outputPath = "$jobDir/$resultsDirName";
 
 
-if (not $ssnOut) {
-    ($ssnOut = $ssnIn) =~ s/^.*?([^\/]+)$/$1/;
-    $ssnOut =~ s/\.(xgmml|zip)$/_colored.xgmml/i;
-}
-(my $ssnName = $ssnOut) =~ s/\.xgmml$//i;
-my $ssnOutZip = "$ssnName.zip";
+my ($fn, $fp, $fx) = fileparse($ssnOut, ".zip", ".xgmml", ".xgmml.zip");
+my $ssnOutZip = "$fn.zip";
+$ssnOut =~ s/\.zip$/.xgmml/;
 
 my $ssnInZip = $ssnIn;
 if ($ssnInZip =~ /\.zip$/i) {
-    $ssnIn =~ s/\.zip$/.xgmml/i;
+    my ($fn, $fp, $fx) = fileparse($ssnIn);
+    my $fname = "$fn.xgmml";
+    $ssnIn = "$jobDir/$fname";
 }
 
 my ($ssnType, $isDomain) = checkNetworkType($ssnInZip);
@@ -130,7 +135,6 @@ if ($optMsaOption =~ m/CR/ and $optAaList !~ m/^[A-Z,]+$/) {
 $skipFasta = 0 if $optMsaOption;
 
 
-$outputDir                  = "output"                          if not $outputDir;
 $mapFileName                = "mapping_table.txt"               if not $mapFileName;
 $domainMapFileName          = "domain_mapping_table.txt"        if not $domainMapFileName;
 $jobId                      = ""                                if not $jobId;
@@ -140,14 +144,12 @@ $clusterSizeFile            = "cluster_sizes.txt"               if not $clusterS
 $clusterNumMapFile          = "cluster_num_map.txt"             if not $clusterNumMapFile;
 $swissprotClustersDescFile  = "swissprot_clusters_desc.txt"     if not $swissprotClustersDescFile;
 $swissprotSinglesDescFile   = "swissprot_singletons_desc.txt"   if not $swissprotSinglesDescFile;
-$efiRefVer                  = 0                                 if not $efiRefVer;
 
 my $jobNamePrefix = $jobId ? "${jobId}_" : "";
 
 $cleanup = defined($cleanup);
 
 
-my $outputPath                  = $ENV{PWD} . "/$outputDir";
 my $clusterDataPath             = "cluster-data";
 my $uniprotNodeDataDir          = "$clusterDataPath/uniprot-nodes";
 my $uniprotDomainNodeDataDir    = "$clusterDataPath/uniprot-domain-nodes";
@@ -163,29 +165,19 @@ my $fastaUniRef50DataDir        = "$clusterDataPath/fasta-uniref50";
 my $fastaUniRef50DomainDataDir  = "$clusterDataPath/fasta-uniref50-domain";
 my $hmmDataDir                  = "$clusterDataPath/hmm";
 
-my $efiRef70NodeDataDir         = "$clusterDataPath/efiref70-nodes";
-my $efiRef50NodeDataDir         = "$clusterDataPath/efiref50-nodes";
-my $fastaEfiRef70DataDir        = "$clusterDataPath/fasta-efiref70";
-my $fastaEfiRef50DataDir        = "$clusterDataPath/fasta-efiref50";
-
-my $uniprotIdZip = "$outputPath/${ssnName}_UniProt_IDs.zip";
-my $uniprotDomainIdZip = "$outputPath/${ssnName}_UniProt_Domain_IDs.zip";
-my $uniRef50IdZip = "$outputPath/${ssnName}_UniRef50_IDs.zip";
-my $uniRef50DomainIdZip = "$outputPath/${ssnName}_UniRef50_Domain_IDs.zip";
-my $uniRef90IdZip = "$outputPath/${ssnName}_UniRef90_IDs.zip";
-my $uniRef90DomainIdZip = "$outputPath/${ssnName}_UniRef90_Domain_IDs.zip";
-my $fastaZip = "$outputPath/${ssnName}_FASTA.zip";
-my $fastaDomainZip = "$outputPath/${ssnName}_FASTA_Domain.zip";
-my $fastaUniRef90Zip = "$outputPath/${ssnName}_FASTA_UniRef90.zip";
-my $fastaUniRef90DomainZip = "$outputPath/${ssnName}_FASTA_UniRef90_Domain.zip";
-my $fastaUniRef50Zip = "$outputPath/${ssnName}_FASTA_UniRef50.zip";
-my $fastaUniRef50DomainZip = "$outputPath/${ssnName}_FASTA_UniRef50_Domain.zip";
-my $hmmZip = "$outputPath/${ssnName}_HMMs.zip";
-
-my $efiRef70IdZip = "$outputPath/${ssnName}_EfiRef70_IDs.zip";
-my $efiRef50IdZip = "$outputPath/${ssnName}_EfiRef50_IDs.zip";
-my $fastaEfiRef70Zip = "$outputPath/${ssnName}_FASTA_EfiRef70.zip";
-my $fastaEfiRef50Zip = "$outputPath/${ssnName}_FASTA_EfiRef50.zip";
+my $uniprotIdZip = "$outputPath/UniProt_IDs.zip";
+my $uniprotDomainIdZip = "$outputPath/UniProt_Domain_IDs.zip";
+my $uniRef50IdZip = "$outputPath/UniRef50_IDs.zip";
+my $uniRef50DomainIdZip = "$outputPath/UniRef50_Domain_IDs.zip";
+my $uniRef90IdZip = "$outputPath/UniRef90_IDs.zip";
+my $uniRef90DomainIdZip = "$outputPath/UniRef90_Domain_IDs.zip";
+my $fastaZip = "$outputPath/FASTA.zip";
+my $fastaDomainZip = "$outputPath/FASTA_Domain.zip";
+my $fastaUniRef90Zip = "$outputPath/FASTA_UniRef90.zip";
+my $fastaUniRef90DomainZip = "$outputPath/FASTA_UniRef90_Domain.zip";
+my $fastaUniRef50Zip = "$outputPath/FASTA_UniRef50.zip";
+my $fastaUniRef50DomainZip = "$outputPath/FASTA_UniRef50_Domain.zip";
+my $hmmZip = "$outputPath/HMMs.zip";
 
 # The if statements apply to the mkdir cmd, not the die().
 my $mkPath = sub {
@@ -214,17 +206,6 @@ mkdir $outputPath or die "Unable to create output directory $outputPath: $!" if 
 &$mkPath($uniRef90DomainNodeDataDir) if not $ssnType or $ssnType eq "UniRef90" and $isDomain;
 &$mkPath($fastaUniRef90DataDir);
 &$mkPath($fastaUniRef90DomainDataDir) if not $ssnType or $ssnType eq "UniRef90" and $isDomain;
-
-if ($efiRefVer) {
-    if ($efiRefVer <= 70) {
-        &$mkPath($efiRef70NodeDataDir);
-        &$mkPath($fastaEfiRef70DataDir);
-    }
-    if ($efiRefVer == 50) {
-        &$mkPath($efiRef50NodeDataDir);
-        &$mkPath($fastaEfiRef50DataDir);
-    }
-}
 
 &$mkPath($hmmDataDir) if $optMsaOption;
 
@@ -263,8 +244,8 @@ my $fileInfo = {
     ssn_out => "$outputPath/$ssnOut",
     ssn_out_zip => "$outputPath/$ssnOutZip",
 
-    domain_map_file => "${ssnName}_$domainMapFileName",
-    map_file => "${ssnName}_$mapFileName",
+    domain_map_file => "$domainMapFileName",
+    map_file => "$mapFileName",
 
     input_seqs_file => "ssn-sequences.fa",
 };
@@ -321,31 +302,6 @@ if (not $ssnType or $ssnType eq "UniRef50") {
     }
 }
 
-if ($efiRefVer and $efiRefVer <= 70) {
-    $fileInfo->{efiref70} = {
-        id_dir => &$absPath($efiRef70NodeDataDir),
-        fasta_dir => &$absPath($fastaEfiRef70DataDir),
-        id_zip => $efiRef70IdZip,
-        fasta_zip => $fastaEfiRef70Zip,
-    };
-    if ($efiRefVer == 50) {
-        $fileInfo->{efiref50} = {
-            id_dir => &$absPath($efiRef50NodeDataDir),
-            fasta_dir => &$absPath($fastaEfiRef50DataDir),
-            id_zip => $efiRef50IdZip,
-            fasta_zip => $fastaEfiRef50Zip,
-        };
-    }
-    $fileInfo->{uniref90} = {
-        id_dir => &$absPath($uniRef90NodeDataDir),
-        fasta_dir => &$absPath($fastaUniRef90DataDir),
-        id_zip => $uniRef90IdZip,
-        fasta_zip => $fastaUniRef90Zip,
-    };
-    $fileInfo->{efiref_tool} = "$gntPath/get_efiref_ids.pl --efi-db $efiRefDb";
-    $fileInfo->{efiref_ver} = $efiRefVer;
-}
-
 if ($optMsaOption) {
     $fileInfo->{hmm_tool_path} = "$gntPath/build_hmm.pl";
     $fileInfo->{hmm_tool_dir} = "$gntPath/hmm";
@@ -374,9 +330,14 @@ if ($optMsaOption) {
     $fileInfo->{output_path} = $outputPath;
     $fileInfo->{cluster_size_file} = $clusterSizeFile;
     $fileInfo->{ssn_type} = $ssnType;
-    $fileInfo->{hmm_zip_prefix} = "${ssnName}";
+    $fileInfo->{hmm_zip_prefix} = ""; #${ssnName}";
 
     $fileInfo->{compute_pim} = 1;
+
+    $fileInfo->{gnt_module} = $gntModule;
+    $fileInfo->{weblogo_path} = "$ENV{EFI_GROUP_HOME}/bin/weblogo"; 
+    $fileInfo->{weblogo_lib} = "$ENV{EFI_GROUP_HOME}/lib/python3.7"; #TODO: get this from the environment
+    $fileInfo->{extra_perl} = $extraPerl;
 }
 
 
@@ -390,8 +351,8 @@ my $scriptArgs =
     " -uniref50-domain-id-dir $uniRef50DomainNodeDataDir" .
     " -uniref90-id-dir $uniRef90NodeDataDir" .
     " -uniref90-domain-id-dir $uniRef90DomainNodeDataDir" .
-    " -id-out ${ssnName}_$mapFileName" .
-    " -id-out-domain ${ssnName}_$domainMapFileName" .
+    " -id-out $mapFileName" .
+    " -id-out-domain $domainMapFileName" .
     " -config $configFile" .
     " -stats \"$statsFile\"" .
     " -conv-ratio \"$convRatioFile\"" .
@@ -412,6 +373,7 @@ my $B = $SS->getBuilder();
 $B->resource(1, 1, "${ramReservation}gb");
 $B->addAction("module load $dbModule");
 $B->addAction("module load $gntModule");
+$B->addAction("source $extraPerl");
 $B->addAction("cd $outputPath");
 $B->addAction("$gntPath/unzip_file.pl -in $ssnInZip -out $ssnIn") if $ssnInZip =~ /\.zip/i;
 #TODO: remove this hack

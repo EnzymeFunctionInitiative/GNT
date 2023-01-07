@@ -9,7 +9,8 @@ use strict;
 use warnings;
 
 use FindBin;
-use Getopt::Long;
+use File::Basename;
+use Getopt::Long qw(:config pass_through);
 use lib $FindBin::Bin . "/lib";
 
 use EFI::SchedulerApi;
@@ -19,7 +20,7 @@ use EFI::GNN::Base;
 use EFI::GNN::Arrows;
 
 
-my ($ssnIn, $nbSize, $warningFile, $gnn, $ssnOut, $cooc, $stats, $pfamHubFile, $baseDir);
+my ($ssnIn, $nbSize, $warningFile, $gnn, $ssnOut, $cooc, $stats, $pfamHubFile, $jobDir, $resultsDirName);
 my ($pfamDirZip, $allPfamDirZip, $splitPfamDirZip, $allSplitPfamDirZip);
 my ($uniprotIdZip, $uniprotDomainIdZip, $uniRef50IdZip, $uniRef50DomainIdZip, $uniRef90IdZip, $uniRef90DomainIdZip, $idOutputFile, $idOutputDomainFile);
 my ($fastaZip, $fastaDomainZip, $fastaUniRef90Zip, $fastaUniRef90DomainZip, $fastaUniRef50Zip, $fastaUniRef50DomainZip, $noneZip);
@@ -27,7 +28,8 @@ my ($dontUseNewNeighborMethod);
 my ($scheduler, $dryRun, $queue, $gnnOnly, $noSubmit, $jobId, $arrowDataFile, $coocTableFile, $extraRam);
 my ($hubCountFile, $clusterSizeFile, $swissprotClustersDescFile, $swissprotSinglesDescFile, $parentDir, $configFile);
 my $result = GetOptions(
-    "output-dir=s"          => \$baseDir,
+    "job-dir=s"             => \$jobDir,
+    "results-dir-name=s"    => \$resultsDirName,
     "ssnin|ssn-in=s"        => \$ssnIn,
     "n|nb-size=s"           => \$nbSize,
     "warning-file=s"        => \$warningFile,
@@ -127,22 +129,27 @@ if ((not defined $configFile or not -f $configFile) and not exists $ENV{EFICONFI
 
 my $fullGntRun = defined $gnnOnly ? 0 : 1;
 
+$jobDir = $ENV{PWD} if not $jobDir;
+$resultsDirName = "output" if not $resultsDirName;
+my $outputDir = "$jobDir/$resultsDirName";
+mkdir $outputDir;
+
 die $usage . "\nERROR: missing queue parameter" if not $queue and $fullGntRun;
 
 
 my $toolpath = $ENV{'EFIGNN'};
 my $efiGnnMod = $ENV{'EFIGNNMOD'};
 my $efiDbMod = $ENV{'EFIDBMOD'};
-my $outputDir = $baseDir ? $baseDir : $ENV{'PWD'};
+my $extraPerl = "$ENV{EFI_PERL_ENV}";
 
-(my $inputFileBase = $ssnIn) =~ s%^.*/([^/]+)$%$1%;
-$inputFileBase =~ s/\.zip$//;
-$inputFileBase =~ s/\.xgmml$//;
+
 
 die "cannot open ssnin file $ssnIn" if not $ssnIn or not -f $ssnIn or not -s $ssnIn;
 my $ssnInZip = $ssnIn;
 if ($ssnIn =~ /\.zip$/i) {
-    $ssnIn =~ s/\.zip$/\.xgmml/i;
+    my ($fn, $fp, $fx) = fileparse($ssnIn);
+    my $fname = "$fn.xgmml";
+    $ssnIn = "$jobDir/$fname";
 }
 
 my ($ssnType, $isDomain) = checkNetworkType($ssnInZip);
@@ -150,18 +157,18 @@ my ($ssnType, $isDomain) = checkNetworkType($ssnInZip);
 $noSubmit = 0                                                               if not defined $noSubmit;
 $nbSize = 10                                                                if not defined $nbSize;
 $cooc = 20                                                                  if not defined $cooc;
-$gnn = "${inputFileBase}_ssn_cluster_gnn.xgmml"                             if not $gnn;
-$ssnOut = "${inputFileBase}_coloredssn.xgmml"                               if not $ssnOut;
-$pfamHubFile = "${inputFileBase}_pfam_family_gnn.xgmml"                     if not $pfamHubFile;
-$warningFile = "${inputFileBase}_nomatches_noneighbors.txt"                 if not $warningFile;
-$arrowDataFile = "${inputFileBase}_arrow_data.sqlite"                       if not $arrowDataFile;
-$coocTableFile = "${inputFileBase}_cooc_table.txt"                          if not $coocTableFile;
-$hubCountFile = "${inputFileBase}_hub_count.txt"                            if not $hubCountFile;
+$gnn = "ssn_cluster_gnn.xgmml"                             if not $gnn;
+$ssnOut = "coloredssn.xgmml"                               if not $ssnOut;
+$pfamHubFile = "pfam_family_gnn.xgmml"                     if not $pfamHubFile;
+$warningFile = "nomatches_noneighbors.txt"                 if not $warningFile;
+$arrowDataFile = "arrow_data.sqlite"                       if not $arrowDataFile;
+$coocTableFile = "cooc_table.txt"                          if not $coocTableFile;
+$hubCountFile = "hub_count.txt"                            if not $hubCountFile;
 $jobId = "000"                                                              if not defined $jobId;
-$stats = "${inputFileBase}_stats.txt"                                       if not $stats;
-$clusterSizeFile = "${inputFileBase}_cluster_sizes.txt"                     if not $clusterSizeFile;
-$swissprotClustersDescFile = "${inputFileBase}_swissprot_clusters_desc.txt" if not $swissprotClustersDescFile;
-$swissprotSinglesDescFile = "${inputFileBase}_swissprot_singles_desc.txt"   if not $swissprotSinglesDescFile;
+$stats = "stats.txt"                                       if not $stats;
+$clusterSizeFile = "cluster_sizes.txt"                     if not $clusterSizeFile;
+$swissprotClustersDescFile = "swissprot_clusters_desc.txt" if not $swissprotClustersDescFile;
+$swissprotSinglesDescFile = "swissprot_singles_desc.txt"   if not $swissprotSinglesDescFile;
 
 
 my ($pfamDir, $allPfamDir, $splitPfamDir, $allSplitPfamDir, $noneDir);
@@ -190,29 +197,29 @@ if ($fullGntRun) {
     $fastaUniRef50DataDir = "$clusterDataDir/fasta-uniref50";
     $fastaUniRef50DomainDataDir = "$clusterDataDir/fasta-uniref50-domain";
 
-    $pfamDirZip = "$outputDir/${inputFileBase}_pfam_mapping.zip"                    if not $pfamDirZip;
-    $allPfamDirZip = "$outputDir/${inputFileBase}_all_pfam_mapping.zip"             if not $allPfamDirZip;
-    $splitPfamDirZip = "$outputDir/${inputFileBase}_split_pfam_mapping.zip"         if not $splitPfamDirZip;
-    $allSplitPfamDirZip = "$outputDir/${inputFileBase}_all_split_pfam_mapping.zip"  if not $allSplitPfamDirZip;
-    $noneZip = "$outputDir/${inputFileBase}_no_pfam_neighbors.zip"                  if not $noneZip;
+    $pfamDirZip = "$outputDir/pfam_mapping.zip"                    if not $pfamDirZip;
+    $allPfamDirZip = "$outputDir/all_pfam_mapping.zip"             if not $allPfamDirZip;
+    $splitPfamDirZip = "$outputDir/split_pfam_mapping.zip"         if not $splitPfamDirZip;
+    $allSplitPfamDirZip = "$outputDir/all_split_pfam_mapping.zip"  if not $allSplitPfamDirZip;
+    $noneZip = "$outputDir/no_pfam_neighbors.zip"                  if not $noneZip;
     
-    $uniprotIdZip = "$outputDir/${inputFileBase}_UniProt_IDs.zip"                   if not $uniprotIdZip;
-    $uniprotDomainIdZip = "$outputDir/${inputFileBase}_UniProt_Domain_IDs.zip"      if not $uniprotDomainIdZip;
-    $fastaZip = "$outputDir/${inputFileBase}_FASTA.zip"                             if not $fastaZip;
-    $fastaDomainZip = "$outputDir/${inputFileBase}_FASTA_Domain.zip"                if not $fastaDomainZip;
+    $uniprotIdZip = "$outputDir/UniProt_IDs.zip"                   if not $uniprotIdZip;
+    $uniprotDomainIdZip = "$outputDir/UniProt_Domain_IDs.zip"      if not $uniprotDomainIdZip;
+    $fastaZip = "$outputDir/FASTA.zip"                             if not $fastaZip;
+    $fastaDomainZip = "$outputDir/FASTA_Domain.zip"                if not $fastaDomainZip;
     
-    $uniRef50IdZip = "$outputDir/${inputFileBase}_UniRef50_IDs.zip"                 if not $uniRef50IdZip;
-    $uniRef50DomainIdZip = "$outputDir/${inputFileBase}_UniRef50_Domain_IDs.zip"    if not $uniRef50DomainIdZip;
-    $fastaUniRef50Zip = "$outputDir/${inputFileBase}_FASTA_UniRef50.zip"            if not $fastaUniRef50Zip;
-    $fastaUniRef50DomainZip = "$outputDir/${inputFileBase}_FASTA_UniRef50_Domain.zip"   if not $fastaUniRef50DomainZip;
+    $uniRef50IdZip = "$outputDir/UniRef50_IDs.zip"                 if not $uniRef50IdZip;
+    $uniRef50DomainIdZip = "$outputDir/UniRef50_Domain_IDs.zip"    if not $uniRef50DomainIdZip;
+    $fastaUniRef50Zip = "$outputDir/FASTA_UniRef50.zip"            if not $fastaUniRef50Zip;
+    $fastaUniRef50DomainZip = "$outputDir/FASTA_UniRef50_Domain.zip"   if not $fastaUniRef50DomainZip;
     
-    $uniRef90IdZip = "$outputDir/${inputFileBase}_UniRef90_IDs.zip"                 if not $uniRef90IdZip;
-    $uniRef90DomainIdZip = "$outputDir/${inputFileBase}_UniRef90_Domain_IDs.zip"    if not $uniRef90DomainIdZip;
-    $fastaUniRef90Zip = "$outputDir/${inputFileBase}_FASTA_UniRef90.zip"            if not $fastaUniRef90Zip;
-    $fastaUniRef90DomainZip = "$outputDir/${inputFileBase}_FASTA_UniRef90_Domain.zip"   if not $fastaUniRef90DomainZip;
+    $uniRef90IdZip = "$outputDir/UniRef90_IDs.zip"                 if not $uniRef90IdZip;
+    $uniRef90DomainIdZip = "$outputDir/UniRef90_Domain_IDs.zip"    if not $uniRef90DomainIdZip;
+    $fastaUniRef90Zip = "$outputDir/FASTA_UniRef90.zip"            if not $fastaUniRef90Zip;
+    $fastaUniRef90DomainZip = "$outputDir/FASTA_UniRef90_Domain.zip"   if not $fastaUniRef90DomainZip;
     
-    $idOutputFile = "${inputFileBase}_mapping_table.txt"                            if not $idOutputFile;
-    $idOutputDomainFile = "${inputFileBase}_mapping_table_domain.txt"               if not $idOutputDomainFile;
+    $idOutputFile = "mapping_table.txt"                            if not $idOutputFile;
+    $idOutputDomainFile = "mapping_table_domain.txt"               if not $idOutputDomainFile;
     
     # Since we're passing relative paths to the cluster_gnn script we need to create the directories with absolute paths.
     my $mkPath = sub {
@@ -362,11 +369,23 @@ if($cooc!~/^\d+$/){
 }
 
 
-(my $ssnName = $ssnOut) =~ s%^.*/([^/]+)\.xgmml$%$1%i;
-my $ssnOutZip = "$outputDir/$ssnName.zip";
-(my $gnnZip = $gnn) =~ s/\.xgmml$/.zip/i;
-(my $pfamHubFileZip = $pfamHubFile) =~ s/\.xgmml$/.zip/i;
-(my $arrowZip = $arrowDataFile) =~ s/\.sqlite/.zip/i if $arrowDataFile;
+my ($fn, $fp, $fx);
+
+($fn, $fp, $fx) = fileparse($ssnOut, ".zip", ".xgmml", ".xgmml.zip");
+my $ssnOutZip = "$fn.zip";
+$ssnOut =~ s/\.zip$/.xgmml/;
+
+($fn, $fp, $fx) = fileparse($gnn, ".zip", ".xgmml", ".xgmml.zip");
+my $gnnZip = "$fn.zip";
+$gnn =~ s/\.zip$/.xgmml/;
+
+($fn, $fp, $fx) = fileparse($pfamHubFile, ".zip", ".xgmml", ".xgmml.zip");
+my $pfamHubFileZip = "$fn.zip";
+$pfamHubFile =~ s/\.zip$/.xgmml/i;
+
+($fn, $fp, $fx) = fileparse($arrowDataFile, ".zip", ".sqlite");
+my $arrowZip = "$fn.zip";
+$arrowDataFile =~ s/\.zip$/.sqlite/g;
 
 my $jobNamePrefix = $jobId ? "${jobId}_" : "";
 
@@ -402,7 +421,8 @@ if ($fullGntRun) {
         "-uniref90-domain-id-dir \"$uniRef90DomainNodeDataDir\" " .
         "-arrow-file \"$arrowDataFile\" " .
         "-cooc-table \"$coocTableFile\" " .
-        "-hub-count-file \"$hubCountFile\" ";
+        "-hub-count-file \"$hubCountFile\" " .
+        "-disable-cache";
     $cmdString .= " -parent-dir \"$parentDir\"" if $parentDir;
 }
 
@@ -436,8 +456,8 @@ my $fileInfo = {
     gnn_zip => &$absPath($gnnZip),
     pfamhubfile => &$absPath($pfamHubFile),
     pfamhubfile_zip => &$absPath($pfamHubFileZip),
-    arrow_file => $arrowDataFile,
-    arrow_zip => $arrowZip,
+    arrow_file => &$absPath($arrowDataFile),
+    arrow_zip => &$absPath($arrowZip),
 
     uniprot_node_data_dir => &$absPath($uniprotNodeDataDir),
     fasta_data_dir => &$absPath($fastaDir),
@@ -513,6 +533,7 @@ $B->resource(1, 1, "${ramReservation}gb");
 $B->addAction("source /etc/profile");
 $B->addAction("module load $efiDbMod");
 $B->addAction("module load $efiGnnMod");
+$B->addAction("source $extraPerl");
 $B->addAction("export BLASTDB=$outputDir/blast");
 $B->addAction("$toolpath/unzip_file.pl -in $ssnInZip -out $ssnIn") if $ssnInZip =~ /\.zip/i;
 $B->addAction($cmdString);

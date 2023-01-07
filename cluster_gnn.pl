@@ -59,7 +59,7 @@ my ($ssnin, $neighborhoodSize, $warningFile, $gnn, $ssnout, $cooccurrence, $stat
     $pfamCoocTable, $hubCountFile, $allPfamDir, $splitPfamDir, $allSplitPfamDir, $clusterSizeFile, $clusterNumMapFile, $swissprotClustersDescFile,
     $swissprotSinglesDescFile, $parentDir, $renumberClusters, $disableCache, $skipIdMapping, $skipOrganism, $debug,
     $outputDir, $excludeFragments, $extraSeqFile, $convRatioFile,
-    $useUniRef, $efiRefVer, $efiRefDb, $efiRef50IdDir, $efiRef70IdDir,
+    $useUniRef, $efiRefVer
 );
 
 my $result = GetOptions(
@@ -103,9 +103,6 @@ my $result = GetOptions(
     "ssn-sequence-file=s"   => \$extraSeqFile,
     "include-uniref:i"      => \$useUniRef,
     "efiref-ver=i"          => \$efiRefVer,
-    "efiref-db=s"           => \$efiRefDb,
-    "efiref-50-dir=s"       => \$efiRef50IdDir,
-    "efiref-70-dir=s"       => \$efiRef70IdDir,
     "conv-ratio=s"          => \$convRatioFile,
     "debug"                 => \$debug,
 );
@@ -166,6 +163,9 @@ USAGE
 
 
 my ($hasParent, $colorOnly, $useNewNeighborMethod, $enableCache);
+
+$outputDir = $ENV{'PWD'} if not $outputDir;
+
 
 validateInputs();
 
@@ -262,8 +262,8 @@ if ($gnn and $warningFile) { #$nomatch and $noneighfile) {
 }
 print $warning_fh "UniProt ID\tNo Match/No Neighbor\n";
 
-my $nbCacheFile = "$ENV{PWD}/storable.hubdata";
-my $numCacheFile = "$ENV{PWD}/storable.numbering";
+my $nbCacheFile = "$outputDir/storable.hubdata";
+my $numCacheFile = "$outputDir/storable.numbering";
 if ($hasParent) {
     if (-f "$parentDir/storable.hubdata") {
         $numCacheFile = "$parentDir/storable.numbering";
@@ -284,28 +284,6 @@ timer("numberClusters");
 
 
 timer("idMapping");
-my $efiRefMap;
-my $efiNodeAttrWriter = sub { return []; };
-my $efiGetIdsFn;
-my $efiGetClusterIdsFn;
-if ($efiRefVer) {
-    $efiRefMap = getEfiRefIds($efiRefVer);
-    $efiNodeAttrWriter = sub {
-        my $nodeId = shift;
-        my $itemWriter = shift;
-        my $listWriter = shift;
-        # Order: attr name, attr type, attr value
-        if ($efiRefVer == 70 and $efiRefMap->{efi70}->{$nodeId}) {
-            &$listWriter("EfiRef70 Cluster IDs", "string", $efiRefMap->{efi70}->{$nodeId});
-        } elsif ($efiRefVer == 50 and $efiRefMap->{efi50}->{$nodeId}) {
-            &$listWriter("EfiRef50 Cluster IDs", "string", $efiRefMap->{efi50}->{$nodeId});
-        }
-    };
-    $efiGetClusterIdsFn = sub {
-        my $clNum = shift;
-        return $efiRefMap->{$efiRefVer}->{$clNum} // [];
-    };
-}
 my ($ssnType) = checkNetworkType($ssnin);
 my $hasDomain = 0;
 my $uniProtUniRefIdMap;
@@ -313,18 +291,12 @@ my $allSwissprotDesc = {};
 my $lookupSwissprot = ($util->getSequenceSource() ne "UniProt");
 if (not $skipIdMapping) {
     print "saving the cluster-protein ID mapping tables\n";
-    my ($result, $uniProtUniRefMap, $uniProtClusterMap, $spDesc) = doClusterMapping($dbh, $util, $ssnType, $efiRefMap, $lookupSwissprot);
+    my ($result, $uniProtUniRefMap, $uniProtClusterMap, $spDesc) = doClusterMapping($dbh, $util, $ssnType, $lookupSwissprot);
     $allSwissprotDesc = $spDesc;
     $hasDomain = $result->{has_domain};
     saveClusterNumMap($clusterNumMapFile, $result->{sizes}) if $result->{sizes} and $clusterNumMapFile;
     saveClusterSizes($clusterSizeFile, $result->{sizes}) if $result->{sizes};
     $uniProtUniRefIdMap = $uniProtUniRefMap;
-    if ($efiRefVer) {
-        $efiGetIdsFn = sub {
-            my $clNum = shift;
-            return $uniProtClusterMap->{$clNum} // [];
-        };
-    }
 }
 $idOutputDomainFile = "" if not $hasDomain;
 timer("idMapping");
@@ -438,7 +410,7 @@ if ($ssnout) {
     my $output=new IO::File(">$ssnout");
     my $writer=new XML::Writer(DATA_MODE => 'true', DATA_INDENT => 2, OUTPUT => $output);
 
-    $util->writeColorSsn($writer, $gnnData, $efiNodeAttrWriter);
+    $util->writeColorSsn($writer, $gnnData);
 }
 timer("writeColorSsn");
 
@@ -454,8 +426,8 @@ $util->writeIdMapping($idOutputFile, $idOutputDomainFile, $taxonIds, $species) i
 # The cluster size mapping file is written near the beginning of the process, so we don't want to
 # write it here.
 my $spDesc = $lookupSwissprot ? $allSwissprotDesc : $swissprotDesc;
-$util->writeSsnStats($allSwissprotDesc, $statsFile, "", $swissprotClustersDescFile, $swissprotSinglesDescFile, $efiGetIdsFn) if $statsFile and $swissprotClustersDescFile and $swissprotSinglesDescFile;
-$util->writeConvRatio($convRatioFile, $nodeDegrees, $efiGetIdsFn, $efiGetClusterIdsFn) if $convRatioFile;
+$util->writeSsnStats($allSwissprotDesc, $statsFile, "", $swissprotClustersDescFile, $swissprotSinglesDescFile) if $statsFile and $swissprotClustersDescFile and $swissprotSinglesDescFile;
+$util->writeConvRatio($convRatioFile, $nodeDegrees) if $convRatioFile;
 $util->finish();
 timer("wrapup");
 
@@ -621,71 +593,13 @@ sub saveClusterNumMap {
 }
 
 
-sub getEfiRefIds {
-    my $efiRefVer = shift;
-
-    my $data = {};
-
-    my $dbh = DBI->connect("dbi:SQLite:dbname=$efiRefDb","","");
-    my %efi70; # EfiRef70 to UniRef90
-    my %efi50; # EfiRef50 to EfiRef70
-
-    my $sql = "SELECT * FROM efi70";
-    my $sth = $dbh->prepare($sql);
-    $sth->execute;
-    while (my $row = $sth->fetchrow_hashref) {
-        push @{$efi70{$row->{cluster_id}}}, $row->{member_id};
-    }
-    $sql = "SELECT * FROM efi50";
-    $sth = $dbh->prepare($sql);
-    $sth->execute;
-    while (my $row = $sth->fetchrow_hashref) {
-        push @{$efi50{$row->{cluster_id}}}, $row->{member_id};
-    }
-
-    $data->{efi70} = \%efi70 if $efiRefVer <= 70;
-    $data->{efi50} = \%efi50 if $efiRefVer == 50;
-    
-    my @clusterNumbers = $util->getClusterNumbers();
-    foreach my $clNum (@clusterNumbers) {
-        my $ids = $util->getIdsInCluster($clNum, ALL_IDS);
-        $data->{70}->{$clNum} = [];
-        $data->{50}->{$clNum} = [];
-        $data->{70}->{$clNum} = $ids if $efiRefVer == 70;
-        $data->{50}->{$clNum} = $ids if $efiRefVer == 50;
-        my @cl70Ids;
-        if ($efiRefVer == 50) {
-            foreach my $id (@$ids) {
-                push @cl70Ids, @{ $efi50{$id} }; # These are EfiRef70
-            }
-            $data->{70}->{$clNum} = \@cl70Ids;
-        }
-        if ($efiRefVer <= 70) {
-            @cl70Ids = @$ids if $efiRefVer == 70;
-            foreach my $id (@cl70Ids) {
-                warn "Couldn't find $id in efi70" and next if not $efi70{$id};
-                push @{$data->{7090}->{$clNum}}, @{ $efi70{$id} }; # These are UniRef90
-            }
-        }
-    }
-
-    return $data;
-}
-
-
 sub doClusterMapping {
     my $dbh = shift;
     my $util = shift;
     my $ssnType = shift;
-    my $efiRefMap = shift;
     my $lookupSwissprot = shift || 0;
    
-    my ($uniprotMap, $domainMap, $uniref50Map, $uniref90Map, $singletonMap, $uniProtUniRefMap, $swissprot);
-    if ($efiRefVer) {
-        ($uniprotMap, $domainMap, $uniref50Map, $uniref90Map, $singletonMap, $uniProtUniRefMap, $swissprot) = getEfiClusterToIdMapping($dbh, $util, $efiRefMap->{7090}, $lookupSwissprot);
-    } else {
-        ($uniprotMap, $domainMap, $uniref50Map, $uniref90Map, $singletonMap, $uniProtUniRefMap, $swissprot) = getClusterToIdMapping($dbh, $util, $lookupSwissprot);
-    }
+    my ($uniprotMap, $domainMap, $uniref50Map, $uniref90Map, $singletonMap, $uniProtUniRefMap, $swissprot) = getClusterToIdMapping($dbh, $util, $lookupSwissprot);
 
     my $domainOutDir = $ssnType eq "UniRef50" ? $uniref50DomainIdDir : 
                             $ssnType eq "UniRef90" ? $uniref90DomainIdDir :
@@ -710,16 +624,6 @@ sub doClusterMapping {
     if ($uniref90IdDir and -d $uniref90IdDir) {
         my ($idCount, $sizes) = saveClusterIdFiles2($uniref90Map, "UniRef90", $uniref90IdDir, $singletonMap);
         $sizeData->{uniref90} = $sizes;
-    }
-    if ($efiRefVer) {
-        if ($efiRefVer == 50 and $efiRef50IdDir and -d $efiRef50IdDir) {
-            my ($idCount, $sizes) = saveClusterIdFiles2($efiRefMap->{50}, "EfiRef50", $efiRef50IdDir, $singletonMap);
-            $sizeData->{efiref50} = $sizes;
-        }
-        if ($efiRefVer <= 70 and $efiRef70IdDir and -d $efiRef70IdDir) {
-            my ($idCount, $sizes) = saveClusterIdFiles2($efiRefMap->{70}, "EfiRef70", $efiRef70IdDir, $singletonMap);
-            $sizeData->{efiref70} = $sizes;
-        }
     }
 
     $result->{sizes} = $sizeData;
@@ -1068,7 +972,6 @@ sub defaultParameters {
     $debug = defined $debug ? 1 : 0;
     $useUniRef = defined $useUniRef ? $useUniRef : 0;
 
-    $outputDir = $ENV{'PWD'} if not defined $outputDir;
     $uniprotIdDir = "$outputDir/uniprot-ids"                    if not $uniprotIdDir;
     $uniref50IdDir = "$outputDir/uniref50-ids"                  if not $uniref50IdDir;
     $uniref90IdDir = "$outputDir/uniref90-ids"                  if not $uniref90IdDir;

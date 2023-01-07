@@ -8,7 +8,7 @@ BEGIN {
 use strict;
 
 use FindBin;
-use Getopt::Long;
+use Getopt::Long qw(:config pass_through);
 use lib $FindBin::Bin . "/lib";
 
 use EFI::SchedulerApi;
@@ -18,7 +18,7 @@ use EFI::GNN::Arrows;
 
 my ($diagramZipFile, $blastSeq, $evalue, $maxNumSeq, $outputFile, $scheduler, $queue, $dryRun,
     $legacy, $title, $nbSize, $idFile, $jobType, $fastaFile, $jobId, $seqDbType, $reverseUniRef);
-my ($taxFile, $taxTreeId, $taxIdType);
+my ($taxFile, $taxTreeId, $taxIdType, $jobDir, $resultsDirName);
 my $result = GetOptions(
     "zip-file=s"            => \$diagramZipFile,
 
@@ -45,6 +45,8 @@ my $result = GetOptions(
     "legacy"                => \$legacy,
     "seq-db-type=s"         => \$seqDbType,
     "reverse-uniref"        => \$reverseUniRef, # Assume that the input ID list is UniProt IDs, not UniRef
+    "job-dir=s"             => \$jobDir,
+    "results-dir-name=s"    => \$resultsDirName,
 );
 
 my $usage = <<USAGE
@@ -94,13 +96,8 @@ if (not -f $diagramZipFile and not $blastSeq and not -f $idFile and not -f $fast
     die "$usage";
 }
 
-if (not $ENV{'EFIGNN'}) {
-    die "The efignt module must be loaded.";
-}
-
-if (not $ENV{"EFIDBMOD"}) {
-    die "The efidb module must be loaded.";
-}
+die "The efignt module must be loaded." if not $ENV{EFI_GNN};
+die "The efidb module must be loaded." if not $ENV{EFI_DB_MOD};
 
 my $blastMod = $legacy ? "blast" : "BLAST";
 if ($blastSeq and $outputFile) {
@@ -112,11 +109,16 @@ if ($blastSeq and $outputFile) {
 }
 
 
-my $outputDir = $ENV{PWD};
-my $toolpath = $ENV{"EFIGNN"};
-my $efiGnnMod = $ENV{"EFIGNNMOD"};
-my $dbMod = $ENV{"EFIDBMOD"};
+my $toolpath = $ENV{EFI_GNN};
+my $efiGnnMod = $ENV{EFI_GNN_MOD};
+my $dbMod = $ENV{EFI_DB_MOD};
 
+$jobDir = $ENV{PWD} if not $jobDir;
+$resultsDirName = "output" if not $resultsDirName;
+my $outputDir = "$jobDir/$resultsDirName";
+mkdir $outputDir;
+
+$outputFile = "$outputDir/$outputFile" if $outputFile !~ m%^/%;
 
 $diagramZipFile = "$outputDir/$diagramZipFile"  if $diagramZipFile and $diagramZipFile !~ /^\//;
 $queue = "efi"                                  unless $queue =~ /\w/;
@@ -126,12 +128,6 @@ $title = ""                                     if not $title;
 $nbSize = 10                                    if not $nbSize;
 $jobId = ""                                     if not defined $jobId;
 
-#if ($diagramZipFile and $diagramZipFile !~ /\.zip$/) {
-#    print "Not unzipping a file that doesn't end in zip ($diagramZipFile)\n";
-#    exit(0);
-#}
-
-(my $diagramDbFile = $diagramZipFile) =~ s/\.zip$/.sqlite/g;
 
 my $stderrFile = "$outputDir/stderr.log";
 my $jobCompletedFile = "$outputDir/job.completed";
@@ -168,7 +164,7 @@ my $jobId;
 if ($blastSeq) {
     $jobType = "BLAST" if not $jobType;
 
-    my $blastDb = $ENV{"EFIDBPATH"} . "/" . getBlastDbName($seqDbType);
+    my $blastDb = $ENV{EFI_DB_DIR} . "/" . getBlastDbName($seqDbType);
     my $seqFile = "$outputDir/query.fa";
     my $blastOutFile = "$outputDir/blast.raw";
     my $blastIdListFile = "$outputDir/blast.ids";
@@ -193,12 +189,15 @@ if ($blastSeq) {
 elsif ($idFile or ($taxFile and defined $taxTreeId and $taxIdType)) {
     $jobType = "ID_LOOKUP" if not $jobType;
 
+    my $inputFile = "$jobDir/$jobId.txt";
     $B->resource(1, 1, "15gb");
     if ($taxFile and defined $taxTreeId and $taxIdType) {
-        $idFile = "$outputDir/ids_from_tax_tree.txt";
-        $B->addAction("extract_taxonomy_tree.pl --json-file $taxFile --output-file $idFile --id-type $taxIdType --tree-id $taxTreeId");
+        $inputFile = "$outputDir/ids_from_tax_tree.txt";
+        $B->addAction("extract_taxonomy_tree.pl --json-file $taxFile --output-file $inputFile --id-type $taxIdType --tree-id $taxTreeId");
+    } else {
+        $B->addAction("cp $idFile $inputFile");
     }
-    outputCreateScript($idFile, $jobType, "--do-id-mapping");
+    outputCreateScript($inputFile, $jobType, "--do-id-mapping");
     $B->addAction("echo $diagramVersion > $outputDir/diagram.version");
 
     addBashErrorCheck($B, 0, $outputFile);
@@ -207,10 +206,13 @@ elsif ($idFile or ($taxFile and defined $taxTreeId and $taxIdType)) {
 elsif ($fastaFile) {
     $jobType = "FASTA" if not $jobType;
 
-    my $tempIdFile = "$outputFile.temp-ids";
+    my $inputFile = "$jobDir/$jobId.fasta";
+    my $tempIdFile = "$outputDir/temp-ids.txt";
 
     $B->resource(1, 1, "10gb");
-    $B->addAction("extract_ids_from_fasta.pl --fasta-file $fastaFile --output-file $tempIdFile");
+
+    $B->addAction("cp $fastaFile $inputFile");
+    $B->addAction("extract_ids_from_fasta.pl --fasta-file $inputFile --output-file $tempIdFile");
     outputCreateScript($tempIdFile, $jobType, "--do-id-mapping");
     $B->addAction("rm $tempIdFile");
     $B->addAction("echo $diagramVersion > $outputDir/diagram.version");
@@ -225,6 +227,8 @@ else {
     # This job simply unzips the file.
     if ($diagramZipFile =~ m/\.zip$/i) {
         $B->addAction("$toolpath/unzip_file.pl -in $diagramZipFile -out $outputFile -out-ext sqlite 2> $stderrFile");
+    } else {
+        $B->addAction("cp $diagramZipFile $outputFile");
     }
     $B->addAction("$toolpath/check_diagram_version.pl -db-file $outputFile -version $diagramVersion -version-file $outputDir/diagram.version");
     addBashErrorCheck($B, 1, $outputFile);
@@ -235,7 +239,7 @@ else {
 $jobType = lc $jobType;
 
 my $jobName = "${jobNamePrefix}diagram_$jobType";
-my $jobScript = "$jobName.sh";
+my $jobScript = "$outputDir/$jobName.sh";
 
 $B->jobName($jobName);
 $B->renderToFile($jobScript);

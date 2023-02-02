@@ -21,7 +21,7 @@ use EFI::GNN::Base;
 use EFI::HMM::Job;
 
 
-my ($ssnIn, $nbSize, $ssnOut, $cooc, $resultsDirName, $scheduler, $dryRun, $queue, $jobId, $jobDir);
+my ($ssnIn, $nbSize, $ssnOut, $ssnOutZip, $cooc, $resultsDirName, $scheduler, $dryRun, $queue, $memQueue, $jobId, $jobDir);
 my ($statsFile, $clusterSizeFile, $clusterNumMapFile, $swissprotClustersDescFile, $swissprotSinglesDescFile);
 my ($jobConfigFile, $domainMapFileName, $mapFileName, $extraRam, $cleanup);
 my ($optMsaOption, $optAaThreshold, $optAaList, $optMinSeqMsa, $optMaxSeqMsa);
@@ -29,11 +29,13 @@ my ($efiRefVer, $efiRefDb, $skipFasta, $convRatioFile);
 my $result = GetOptions(
     "ssn-in=s"                  => \$ssnIn,
     "ssn-out=s"                 => \$ssnOut,
+    "ssn-out-zip=s"             => \$ssnOutZip,
     "results-dir-name=s"        => \$resultsDirName, # name of results sub dir
     "job-dir=s"                 => \$jobDir,
     "scheduler=s"               => \$scheduler,
     "dry-run"                   => \$dryRun,
     "queue=s"                   => \$queue,
+    "mem-queue=s"               => \$memQueue,
     "job-id=s"                  => \$jobId,
     "map-file-name=s"           => \$mapFileName,
     "domain-map-file-name=s"    => \$domainMapFileName,
@@ -101,8 +103,10 @@ if (not $ssnIn or not -s $ssnIn) {
     die "-ssnin $ssnIn does not exist or has a zero size\n$usage";
 }
 
-die "$usage\nERROR: missing -queue parameter" if not $queue;
+die "$usage\nERROR: missing --queue or --mem-queue parameter" if (not $queue and not $memQueue);
 
+#TODO: dynamic
+$queue = $memQueue if $memQueue;
 
 
 $jobDir = $ENV{PWD} if not $jobDir;
@@ -111,12 +115,12 @@ my $outputPath = "$jobDir/$resultsDirName";
 
 
 my ($fn, $fp, $fx) = fileparse($ssnOut, ".zip", ".xgmml", ".xgmml.zip");
-my $ssnOutZip = "$fn.zip";
+$ssnOutZip = "ssn.zip" if not $ssnOutZip;
 $ssnOut =~ s/\.zip$/.xgmml/;
 
 my $ssnInZip = $ssnIn;
 if ($ssnInZip =~ /\.zip$/i) {
-    my ($fn, $fp, $fx) = fileparse($ssnIn);
+    my ($fn, $fp, $fx) = fileparse($ssnIn, ".zip");
     my $fname = "$fn.xgmml";
     $ssnIn = "$jobDir/$fname";
 }

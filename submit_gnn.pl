@@ -20,12 +20,12 @@ use EFI::GNN::Base;
 use EFI::GNN::Arrows;
 
 
-my ($ssnIn, $nbSize, $warningFile, $gnn, $ssnOut, $cooc, $stats, $pfamHubFile, $jobDir, $resultsDirName);
+my ($ssnIn, $nbSize, $warningFile, $gnn, $gnnZip, $ssnOut, $ssnOutZip, $cooc, $stats, $pfamHubFile, $pfamHubFileZip, $jobDir, $resultsDirName);
 my ($pfamDirZip, $allPfamDirZip, $splitPfamDirZip, $allSplitPfamDirZip);
 my ($uniprotIdZip, $uniprotDomainIdZip, $uniRef50IdZip, $uniRef50DomainIdZip, $uniRef90IdZip, $uniRef90DomainIdZip, $idOutputFile, $idOutputDomainFile);
 my ($fastaZip, $fastaDomainZip, $fastaUniRef90Zip, $fastaUniRef90DomainZip, $fastaUniRef50Zip, $fastaUniRef50DomainZip, $noneZip);
 my ($dontUseNewNeighborMethod);
-my ($scheduler, $dryRun, $queue, $gnnOnly, $noSubmit, $jobId, $arrowDataFile, $coocTableFile, $extraRam);
+my ($scheduler, $dryRun, $queue, $memQueue, $gnnOnly, $noSubmit, $jobId, $arrowDataFile, $coocTableFile, $extraRam);
 my ($hubCountFile, $clusterSizeFile, $swissprotClustersDescFile, $swissprotSinglesDescFile, $parentDir, $configFile);
 my $result = GetOptions(
     "job-dir=s"             => \$jobDir,
@@ -34,13 +34,16 @@ my $result = GetOptions(
     "n|nb-size=s"           => \$nbSize,
     "warning-file=s"        => \$warningFile,
     "gnn=s"                 => \$gnn,
+    "gnn-zip=s"             => \$gnnZip,
     "ssnout|ssn-out=s"      => \$ssnOut,
+    "ssn-out-zip=s"         => \$ssnOutZip,
     "incfrac|cooc=i"        => \$cooc,
     "stats=s"               => \$stats,
     "cluster-sizes=s"       => \$clusterSizeFile,
     "sp-clusters-desc=s"    => \$swissprotClustersDescFile,
     "sp-singletons-desc=s"  => \$swissprotSinglesDescFile,
-    "pfam=s"                => \$pfamHubFile,
+    "pfam-hub=s"            => \$pfamHubFile,
+    "pfam-hub-zip=s"        => \$pfamHubFileZip,
     "pfam-zip=s"            => \$pfamDirZip,
     "all-pfam-zip=s"        => \$allPfamDirZip,
     "split-pfam-zip=s"      => \$splitPfamDirZip,
@@ -65,6 +68,7 @@ my $result = GetOptions(
     "scheduler=s"           => \$scheduler,
     "dry-run"               => \$dryRun,
     "queue=s"               => \$queue,
+    "mem-queue=s"           => \$memQueue,
     "extra-ram"             => \$extraRam,
     "gnn-only"              => \$gnnOnly,
     "no-submit"             => \$noSubmit,
@@ -134,7 +138,10 @@ $resultsDirName = "output" if not $resultsDirName;
 my $outputDir = "$jobDir/$resultsDirName";
 mkdir $outputDir;
 
-die $usage . "\nERROR: missing queue parameter" if not $queue and $fullGntRun;
+die $usage . "\nERROR: missing --queue or --mem-queue parameter" if ((not $queue and not $memQueue) and $fullGntRun);
+
+#TODO: dynamic
+$queue = $memQueue if $memQueue;
 
 
 my $toolpath = $ENV{'EFIGNN'};
@@ -158,7 +165,7 @@ $noSubmit = 0                                                               if n
 $nbSize = 10                                                                if not defined $nbSize;
 $cooc = 20                                                                  if not defined $cooc;
 $gnn = "ssn_cluster_gnn.xgmml"                             if not $gnn;
-$ssnOut = "coloredssn.xgmml"                               if not $ssnOut;
+$ssnOut = "ssn.xgmml"                                      if not $ssnOut;
 $pfamHubFile = "pfam_family_gnn.xgmml"                     if not $pfamHubFile;
 $warningFile = "nomatches_noneighbors.txt"                 if not $warningFile;
 $arrowDataFile = "arrow_data.sqlite"                       if not $arrowDataFile;
@@ -372,19 +379,19 @@ if($cooc!~/^\d+$/){
 my ($fn, $fp, $fx);
 
 ($fn, $fp, $fx) = fileparse($ssnOut, ".zip", ".xgmml", ".xgmml.zip");
-my $ssnOutZip = "$fn.zip";
+$ssnOutZip = "coloredssn.zip" if not $ssnOutZip;
 $ssnOut =~ s/\.zip$/.xgmml/;
 
 ($fn, $fp, $fx) = fileparse($gnn, ".zip", ".xgmml", ".xgmml.zip");
-my $gnnZip = "$fn.zip";
+$gnnZip = "ssn_cluster_gnn.zip" if not $gnnZip;
 $gnn =~ s/\.zip$/.xgmml/;
 
 ($fn, $fp, $fx) = fileparse($pfamHubFile, ".zip", ".xgmml", ".xgmml.zip");
-my $pfamHubFileZip = "$fn.zip";
+$pfamHubFileZip = "pfam_family_gnn.zip" if not $pfamHubFileZip;
 $pfamHubFile =~ s/\.zip$/.xgmml/i;
 
 ($fn, $fp, $fx) = fileparse($arrowDataFile, ".zip", ".sqlite");
-my $arrowZip = "$fn.zip";
+my $arrowZip = "$jobId.zip";
 $arrowDataFile =~ s/\.zip$/.sqlite/g;
 
 my $jobNamePrefix = $jobId ? "${jobId}_" : "";

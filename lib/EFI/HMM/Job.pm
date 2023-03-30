@@ -4,6 +4,8 @@ package EFI::HMM::Job;
 use strict;
 use warnings;
 
+use Data::Dumper;
+
 
 sub makeJob {
     my $SS = shift;
@@ -43,7 +45,7 @@ sub makeJob {
     my $maxMsaSeq = int($info->{hmm_max_seq_msa} // 0);
     my $doPim = $info->{compute_pim} // 0;
 
-    my $checkFn = sub { return $info->{$_[0]}->{fasta_dir} ? $_[0] : ""; };
+    my $checkFn = sub { return ($info->{$_[0]} and $info->{$_[0]}->{fasta_dir}) ? $_[0] : ""; };
     my $dataType = &$checkFn("efiref50") ? "efiref50" : (&$checkFn("uniref50") ? "uniref50" : (&$checkFn("efiref70") ? "efiref70" : (&$checkFn("uniref90") ? "uniref90" : "uniprot")));
     $dataType = "uniprot" if not $dataType;
     my $mainFastaDir = $info->{uniprot}->{fasta_dir};
@@ -277,9 +279,7 @@ SCRIPT
             );
         };
         &$outputFn($info->{uniref90}, "uniref90") if $info->{uniref90} and $info->{uniref90}->{fasta_dir};
-        &$outputFn($info->{efiref70}, "efiref70") if $info->{efiref70} and $info->{efiref70}->{fasta_dir};
         &$outputFn($info->{uniref50}, "uniref50") if $info->{uniref50} and $info->{uniref50}->{fasta_dir};
-        &$outputFn($info->{efiref50}, "efiref50") if $info->{efiref50} and $info->{efiref50}->{fasta_dir};
     }
 
     $B->addAction(<<SCRIPT
@@ -462,17 +462,9 @@ SCRIPT
 SCRIPT
             );
         };
-        if ($info->{uniprot_domain}) {
-            &$outputFn($info->{uniprot_domain});
-        } elsif ($info->{uniref90_domain}) {
-            &$outputFn($info->{uniref90_domain});
-        } elsif ($info->{uniref50_domain}) {
-            &$outputFn($info->{uniref50_domain});
-        } elsif ($info->{efiref70_domain}) {
-            &$outputFn($info->{efiref70_domain});
-        } elsif ($info->{efiref50_domain}) {
-            &$outputFn($info->{efiref50_domain});
-        }
+        &$outputFn($info->{uniprot_domain}, "uniprot") if $info->{uniprot_domain};
+        &$outputFn($info->{uniref90_domain}, "uniref90") if $info->{uniref90_domain};
+        &$outputFn($info->{uniref50_domain}, "uniref50") if $info->{uniref50_domain};
     }
 
     $B->addAction(<<SCRIPT

@@ -876,8 +876,6 @@ sub addFileActions {
     &$outFn($info->{uniprot}, $info->{uniprot_domain}, "UniProt", $extraFasta);
     &$outFn($info->{uniref90}, $info->{uniref90_domain}, "UniRef90");
     &$outFn($info->{uniref50}, $info->{uniref50_domain}, "UniRef50");
-    &$outFn($info->{efiref50}, $info->{efiref50_domain}, "EfiRef50", "--file-pat EfiRef") if $info->{efiref_tool};
-    &$outFn($info->{efiref70}, $info->{efiref70_domain}, "EfiRef70", "--file-pat EfiRef") if $info->{efiref_tool};
 
     $outFn = sub {
         my ($dirs, $type) = @_;
@@ -886,8 +884,6 @@ sub addFileActions {
     &$outFn($info->{uniprot_domain}, "UniProt_Domain");
     &$outFn($info->{uniref90_domain}, "UniRef90_Domain");
     &$outFn($info->{uniref50_domain}, "UniRef50_Domain");
-    &$outFn($info->{efiref50_domain}, "EfiRef50_Domain");
-    &$outFn($info->{efiref70_domain}, "EfiRef70_Domain");
 
     $outFn = sub {
         my ($dirs, $varType) = @_;
@@ -899,10 +895,6 @@ sub addFileActions {
     &$outFn($info->{uniref90_domain}, "_DOMAIN");
     &$outFn($info->{uniref50}, "");
     &$outFn($info->{uniref50_domain}, "_DOMAIN");
-    &$outFn($info->{efiref70}, "");
-    &$outFn($info->{efiref70_domain}, "_DOMAIN");
-    &$outFn($info->{efiref50}, "");
-    &$outFn($info->{efiref50_domain}, "_DOMAIN");
 
     #&$writeGetFastaIf($info->{uniprot_node_data_dir}, $info->{uniprot_node_zip}, "cluster_All_UniProt_IDs.txt", $info->{uniprot_domain_node_data_dir}, $info->{fasta_data_dir}, $info->{fasta_domain_data_dir}, $extraFasta);
     #&$writeGetFastaIf($info->{uniref90_node_data_dir}, $info->{uniref90_node_zip}, "cluster_All_UniRef90_IDs.txt", $info->{uniref90_domain_node_data_dir}, $info->{fasta_uniref90_data_dir}, $info->{fasta_uniref90_domain_data_dir});
@@ -930,30 +922,6 @@ sub addFileActions {
     $B->addAction("zip -jq -r $info->{all_split_pfam_zip} $info->{all_split_pfam_dir} -i '*'") if $info->{all_split_pfam_zip} and $info->{all_split_pfam_dir};
     $B->addAction("zip -jq -r $info->{none_zip} $info->{none_dir}") if $info->{none_zip} and $info->{none_dir};
     $B->addAction("zip -jq $info->{arrow_zip} $info->{arrow_file}") if $info->{arrow_zip} and $info->{arrow_file};
-
-    #if ($info->{efiref_tool}) {
-    #    &$writeGetFastaIf($info->{efiref70_node_data_dir}, $info->{efiref70_node_zip}, "cluster_All_EfiRef70_IDs.txt", "", $info->{fasta_efiref70_data_dir}, "", "--file-pat Efi");
-    #    &$writeGetFastaIf($info->{efiref50_node_data_dir}, $info->{efiref50_node_zip}, "cluster_All_EfiRef50_IDs.txt", "", $info->{fasta_efiref50_data_dir}, "", "--file-pat Efi");
-    #    &$writeBashZipIf($info->{fasta_efiref70_data_dir}, $info->{fasta_efiref70_zip}, "all.fasta");
-    #    &$writeBashZipIf($info->{fasta_efiref50_data_dir}, $info->{fasta_efiref50_zip}, "all.fasta");
-    #}
-        
-    #    my $idDir = "";
-    #    my $outParms = "--uniref90-dir $info->{uniref90_node_data_dir}";
-    #    if ($info->{efiref_ver} == 70) {
-    #        # The SSN that is input is a EfiRef SSN, but the scripts think it's a UniProt SSN.
-    #        $B->addAction("mv $info->{uniprot_node_data_dir}/* $info->{efiref70_node_data_dir}");
-    #        $B->addAction("mv $info->{fasta_data_dir}/* $info->{fasta_efiref70_data_dir}");
-    #        $idDir = $info->{efiref70_node_data_dir};
-    #    } elsif ($info->{efiref_ver} == 50) {
-    #        $B->addAction("mv $info->{uniprot_node_data_dir}/* $info->{efiref50_node_data_dir}");
-    #        $B->addAction("mv $info->{fasta_data_dir}/* $info->{fasta_efiref50_data_dir}");
-    #        $idDir = $info->{efiref50_node_data_dir};
-    #        $outParms .= " --efiref70-dir $info->{efiref70_node_data_dir}";
-    #    }
-    #    $B->addAction("$info->{efiref_tool} --seed-ver $info->{efiref_ver} --seed-id-dir $idDir $outParms");
-    #    $B->addAction("
-    #}
 }
 
 sub getColor {

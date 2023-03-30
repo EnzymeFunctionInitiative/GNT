@@ -556,7 +556,7 @@ $B->renderToFile("$outputDir/submit_gnn.sh");
 if (not $noSubmit) {
     my $gnnjob = $SS->submit("$outputDir/submit_gnn.sh");
     chomp $gnnjob;
-    print "Job to make gnn network is :\n $gnnjob";
+    print "Job to make gnn network is:\n$gnnjob\n";
 }
 
 

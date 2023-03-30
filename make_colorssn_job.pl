@@ -326,8 +326,6 @@ if ($optMsaOption) {
     $fileInfo->{hmm_amino_acids} = [split(m/,/, $optAaList)];
     my @colors = ("red", "blue", "orange", "DarkGreen", "Magenta", "Gray");
     $fileInfo->{hmm_weblogo_colors} = \@colors;
-    $fileInfo->{hmm_max_seq_msa} = $optMaxSeqMsa // 700;
-
     $optMinSeqMsa = ($optMinSeqMsa and $optMinSeqMsa >= 1) ? $optMinSeqMsa : 5;
     $fileInfo->{hmm_min_seq_msa} = $optMinSeqMsa;
 
@@ -392,24 +390,27 @@ my $jobName = "${jobNamePrefix}color_ssn";
 my $jobScript = "$outputPath/$jobName.sh";
 $B->jobName($jobName);
 $B->renderToFile($jobScript);
-$jobId = $SS->submit($jobScript);
-print "Color SSN job is:\n $jobId";
+my $colorJobId = $SS->submit($jobScript);
 
+print "Color SSN job is:\n$colorJobId\n";
+
+my $hmmJobId;
 if ($optMsaOption) {
-    $B = EFI::HMM::Job::makeJob($SS, $fileInfo, $jobId);
+    $B = EFI::HMM::Job::makeJob($SS, $fileInfo, $colorJobId);
     $B->addAction("touch $outputPath/1.out.completed");
     $jobName = "${jobNamePrefix}hmm_and_stuff";
     $jobScript = "$outputPath/$jobName.sh";
     $B->jobName($jobName);
     $B->renderToFile($jobScript);
-    $jobId = $SS->submit($jobScript);
-    print "\nHMM and stuff job is:\n $jobId";
+    $hmmJobId = $SS->submit($jobScript);
+    print "HMM and stuff job is:\n$hmmJobId\n";
 }
 
+my $cleanupJobId;
 if ($cleanup) {
     $B = $SS->getBuilder(); 
     $B->resource(1, 1, "1GB");
-    $B->dependency(0, $jobId);
+    $B->dependency(0, $hmmJobId // $colorJobId);
     $B->addAction("cd $outputPath");
     my $paths = join(" ", map { "$outputPath/$_" } (
         $uniprotNodeDataDir, $uniprotDomainNodeDataDir, $fastaUniProtDataDir, $fastaUniProtDomainDataDir,
@@ -421,8 +422,16 @@ if ($cleanup) {
     $jobScript = "$outputPath/$jobName.sh";
     $B->jobName($jobName);
     $B->renderToFile($jobScript);
-    $jobId = $SS->submit($jobScript);
+    $cleanupJobId = $SS->submit($jobScript);
 }
+
+my @jobIds = ($colorJobId);
+push @jobIds, $hmmJobId if $hmmJobId;
+push @jobIds, $cleanupJobId if $cleanupJobId;
+my $jobIds = join(",", @jobIds);
+
+print "Job IDs:\n$jobIds\n";
+
 
 
 sub getDefaults {

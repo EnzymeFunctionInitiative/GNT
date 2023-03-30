@@ -246,7 +246,7 @@ $B->renderToFile($jobScript);
 $jobId = $SS->submit($jobScript);
 chomp $jobId;
 
-print "Diagram job ($jobType) is :\n $jobId";
+print "Diagram job ($jobType) is:\n$jobId\n";
 
 
 

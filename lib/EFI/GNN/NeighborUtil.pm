@@ -176,7 +176,7 @@ SQL
     my $id = $row->{ID};
     my $acc_start = int($row->{start});
     my $acc_stop = int($row->{stop});
-    my $acc_seq_len = int(abs($acc_stop - $acc_start) / 3 - 1);
+    my $acc_seq_len = int(abs($acc_stop - $acc_start + 1) / 3) - 1;
     print "WARNING: missing metadata for $row->{AC}; is entry obsolete? [N]\n" if not $row->{metadata};
     my $md = $self->{anno}->decode_meta_struct($row->{metadata});
     my $acc_strain = $md->{strain} // "";

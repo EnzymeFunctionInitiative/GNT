@@ -26,12 +26,14 @@ use EFI::IdMapping;
 use EFI::IdMapping::Util;
 
 
-my ($idListFile, $dbFile, $nbSize, $noNeighborFile, $doIdMapping, $configFile, $title, $blastSeq, $jobType, $uniRefVersion, $clusterMapFile, $debugLimit);
+my ($idListFile, $dbFile, $nbSize, $noNeighborFile, $doIdMapping, $configFile, $title, $blastSeq, $jobType, $uniRefVersion, $clusterMapFile, $debugLimit, $uniRefMapFile);
 my $result = GetOptions(
     "id-file=s"             => \$idListFile,
     "db-file=s"             => \$dbFile,
 
     "no-neighbor-file=s"    => \$noNeighborFile,
+
+    "uniref-map-file=s"     => \$uniRefMapFile, # In the case that this is a UniRef job, the mapping of UniProt to UniRef is contained in this file.
 
     "nb-size=n"             => \$nbSize,
     "blast-seq-file=s"      => \$blastSeq,
@@ -54,6 +56,7 @@ usage: $0 -id-file <input_file> -db-file <output_file> [-no-match-file <output_f
         [-no-neighbor-file <output_file>] [-nb-size <neighborhood_size>] [-config <config_file>]
 
     --id-file           path to a file containing a list of IDs to retrieve neighborhoods for
+    --evalue-file       file with evalues for UniRef seed sequences
     --db-file           path to an output file (sqlite) to put the arrow diagram data in
 
                         step (e.g. FASTA parse)
@@ -99,7 +102,7 @@ if ($clusterMapFile and -f $clusterMapFile) {
 
 
 
-my ($inputIdsRef, $evalues, $uniRef50, $uniRef90) = getInputIds($idListFile);
+my ($inputIdsRef, $evalues, $uniRef50, $uniRef90) = getInputIds($idListFile, $uniRefMapFile);
 my @inputIds = @$inputIdsRef;
 my @unmatchedIds;
 my $idsMapped = {};
@@ -347,36 +350,93 @@ sub getUnmatchedIds {
 
 sub getInputIds {
     my $file = shift;
+    my $uniRefMapFile = shift;
 
     my @ids;
     my %evalues;
-    my %uniRef90;
-    my %uniRef5090;
 
-    open FILE, $file or die "Unable to open $file for reading: $!";
-    while (<FILE>) {
-        s/[\r\n]+$//;
-        my @lineIds = split(/,+/, $_);
+    my $uniprotOnlyHandler = sub {
+        my ($id, $evalue) = @_;
+        if (defined $evalue) {
+            $evalues{$id} = $evalue;
+        }
+        push @ids, $id;
+    };
+    
+    my $uniRefHandler = sub {
+        my ($id, $evalue) = @_;
+        if (defined $evalue) {
+            $evalues{$id} = $evalue;
+        }
+    };
+    my $uniRefMapHandler = sub {
+        my ($ur50, $ur90, $up) = @_;
+        push @ids, $ur50;
+    };
+
+    my $uniRef50 = {};
+    my $uniRef90 = {};
+
+    if ($uniRefMapFile and $uniRefVersion) {
+        parseBlastFile($file, $uniRefHandler);
+        ($uniRef50, $uniRef90) = parseUniRefMapFile($uniRefMapFile, $uniRefMapHandler);
+    } else {
+        parseBlastFile($file, $uniprotOnlyHandler);
+    }
+
+    #print "========================================================================================= Uniref50\n";
+    #print Dumper($uniRef50);
+    #print "================================ ======================================================== Uniref90\n";
+    #print Dumper($uniRef90);
+
+    return (\@ids, \%evalues, $uniRef50, $uniRef90);
+}
+
+
+sub parseBlastFile {
+    my $file = shift;
+    my $handler = shift;
+
+    open my $fh, "<", $file or die "Unable to open id list file $file for reading: $!";
+    while (my $line = <$fh>) {
+        $line =~ s/[\r\n]+$//;
+        my @lineIds = split(/,+/, $line);
         foreach my $idLine (@lineIds) {
             my @parts = split(m/\t/, $idLine);
             my $id = $parts[0];
             my $evalue;
             if ($id =~ m/\|/) {
                 ($id, $evalue) = split(m/\|/, $id);
-                $evalues{$id} = $evalue;
             }
-            if ($uniRefVersion and scalar @parts > 2) {
-                push @{$uniRef90{$parts[1]}}, $id;
-                $uniRef5090{$parts[2]}->{$parts[1]}++; # UniRef50 -> UniRef90
-#                push @ids, $parts[1] if $uniRefVersion == 90;
-#                push @ids, $parts[2] if $uniRefVersion == 50;
-#            } else {
-#                push @ids, $id;
-            }
-                push @ids, $id;
+            &$handler($id, $evalue);
         }
     }
-    close FILE;
+    close $fh;
+}
+
+
+sub parseUniRefMapFile {
+    my $mapFile = shift;
+    my $idHandler = shift;
+
+    my %uniRef90;
+    my %uniRef5090;
+
+    open my $fh, "<", $uniRefMapFile or die "Unable to open uniref map file $uniRefMapFile for reading: $!";
+    while (my $line = <$fh>) {
+        $line =~ s/[\r\n]+$//;
+        my @lineIds = split(/,+/, $line);
+        foreach my $idLine (@lineIds) {
+            my @parts = split(m/\t/, $idLine);
+            my $id = $parts[0];
+            if (@parts > 2) {
+                push @{$uniRef90{$parts[1]}}, $id;
+                $uniRef5090{$parts[2]}->{$parts[1]}++; # UniRef50 -> UniRef90
+            }
+            &$idHandler(@parts);
+        }
+    }
+    close $fh;
 
     my %uniRef50;
     foreach my $ur50 (keys %uniRef5090) {
@@ -385,7 +445,7 @@ sub getInputIds {
         }
     }
 
-    return (\@ids, \%evalues, \%uniRef50, \%uniRef90);
+    return (\%uniRef50, \%uniRef90);
 }
 
 

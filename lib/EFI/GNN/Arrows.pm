@@ -59,27 +59,14 @@ sub writeArrowData {
 
     unlink $file if -f $file;
 
-    #my $dbh = DBI->connect("dbi:SQLite:dbname=$file","","");
     my $dbh = $self->getDbh($file);
     $dbh->{AutoCommit} = 0;
 
-#    my $trans = sub {
-#        $dbh->begin_work;
-#        &{$_[0]};
-#        $dbh->commit;
-#    };
-
-#    &$trans(sub {
-        $self->createSchema($dbh);
-#    });
-
-#    &$trans(sub {
-        $self->saveMetadata($dbh, $metadata, $clusterCenters);
-#    });
+    $self->createSchema($dbh);
+    $self->saveMetadata($dbh, $metadata, $clusterCenters);
 
     my $sortedIds = $self->sortIds($data, $orderedIds);
     my @sortedIds = @$sortedIds;
-    print "NUM AIDS: " . (scalar @sortedIds) . "\n";
 
     my ($extents, $indexMap, $clusterMap);
     my $numInsert = 0;
@@ -89,31 +76,23 @@ sub writeArrowData {
         if ($numInsert++ > 100000) {
             $dbh->commit;
             $numInsert = 0;
-#            $t1 = printTime($t1, "insert 50");
         }
-        #$dbh->begin_work if not $numInsert;
         $dbh->do($sql);
     };
     ($extents, $indexMap, $clusterMap) = $self->saveData($dbh, $data, $sortedIds, $insertHandler);
     $dbh->commit;
-#    print "Yup\n";
-#    die;
 
-#    &$trans(sub {
-        $self->saveExtents($dbh, $extents);
-#    });
+    $self->saveExtents($dbh, $extents);
 
     # Save UniRef map (one-to-many, UniRef50 ID -> UniRef90 ID, or UniRef90 ID -> UniProt ID)
     if ($self->{uniref_version}) {
-#        &$trans(sub {
-            $self->saveUniRef($dbh, $ur50, $ur90, $indexMap, $clusterMap, $insertHandler);
-#        });
+        $self->saveUniRef($dbh, $ur50, $ur90, $data, $orderedIds, $indexMap, $clusterMap, $insertHandler);
     }
 
     $dbh->commit;
 
     $dbh->disconnect();
-    print "Done with loading database\n";
+    #print "Done with loading database\n";
 }
 
 sub printTime {
@@ -245,7 +224,24 @@ sub sortIds {
     my $orderedIds = shift;
 
     # Sort first by cluster number then by accession.
-    my $sortFn = sub {
+    my $sortFn = $self->makeIdSortFn($data);
+    my @sortedIds = keys %$data;
+    if (defined $orderedIds and ref $orderedIds eq "ARRAY" and scalar @$orderedIds == scalar @sortedIds) {
+        @sortedIds = @$orderedIds;
+    } elsif (scalar @sortedIds and exists $data->{$sortedIds[0]}->{attributes}->{cluster_num}) {
+        @sortedIds = sort $sortFn @sortedIds;
+    } else {
+        @sortedIds = sort @sortedIds;
+    }
+
+    return \@sortedIds;
+}
+
+sub makeIdSortFn {
+    my $self = shift;
+    my $data = shift;
+
+    return sub {
         return 0 if not $data->{$a}->{attributes} and not $data->{$b}->{attributes};
         return 1 if not $data->{$a}->{attributes};
         return -1 if not $data->{$b}->{attributes};
@@ -261,31 +257,6 @@ sub sortIds {
         $comp = $data->{$a}->{attributes}->{accession} cmp $data->{$b}->{attributes}->{accession};
         return $comp;
     };
-    my @sortedIds = keys %$data;
-    if (defined $orderedIds and ref $orderedIds eq "ARRAY" and scalar @$orderedIds == scalar @sortedIds) {
-        @sortedIds = @$orderedIds;
-    } elsif (scalar @sortedIds and exists $data->{$sortedIds[0]}->{attributes}->{cluster_num}) {
-        @sortedIds = sort $sortFn @sortedIds;
-    } else {
-        @sortedIds = sort @sortedIds;
-    }
-
-    # Sort by UniRef cluster size
-    #my $uniRefSortFn = sub {
-    #    my $comp = $data->{$b}->{attributes}->{uniref90_size} <=> $data->{$a}->{attributes}->{uniref90_size};
-    #    return $comp if $comp;
-    #    if ($self->{uniref_version} == 50) {
-    #        $comp = $data->{$b}->{attributes}->{uniref50_size} <=> $data->{$a}->{attributes}->{uniref50_size};
-    #        return $comp if $comp;
-    #    }
-    #    $comp = ($data->{$b}->{attributes}->{accession} // "") cmp ($data->{$a}->{attributes}->{accession} // "");
-    #    return $comp;
-    #};
-    #if ($self->{uniref_version}) {
-    #    @sortedIds = sort $uniRefSortFn @sortedIds;
-    #}
-
-    return \@sortedIds;
 }
 
 sub saveExtents {
@@ -306,11 +277,13 @@ sub saveUniRef {
     my $dbh = shift;
     my $ur50 = shift;
     my $ur90 = shift;
+    my $data = shift; # Original seed sequence metadata
+    my $orderedIds = shift; # Seed sequence IDs sorted by BLAST (evalue)
     my $indexMap = shift;   # Map of UniProt ID to UniProt table index
     my $clusterMap = shift; # Map of UniProt ID to UniProt SSN cluster number
     my $insertTransactionHandler = shift;
 
-    my $makeSortFn = sub {
+    my $sortClustersBySizeFn = sub {
         my $sortHash = shift;
         return sub {
             my $comp = scalar @{$sortHash->{$b}} <=> scalar @{$sortHash->{$a}};
@@ -319,18 +292,22 @@ sub saveUniRef {
         };
     };
 
+    my $idSortFn = $self->makeIdSortFn($data);
+
     # cluster_index = index of UniRef ID within a sorted SSN cluster
     # cluster_num = SSN cluster number
 
-    my $ur50SortFn = &$makeSortFn($ur50);
-    my $ur90SortFn = &$makeSortFn($ur90);
+    my $sortClustersBySizeUniRef50Fn = &$sortClustersBySizeFn($ur50);
+    my $sortClustersBySizeUniRef90Fn = &$sortClustersBySizeFn($ur90);
+
     my $insertUniRefFn = sub {
-        my $sortFn = shift;
+        my $clusterSortFn = shift;
+        my $idSortFn = shift;
         my $uniref = shift;
         my $ver = shift;
-        my $ur90SortFn = shift || 0;
+        my $sortClustersBySizeUniRef90Fn = shift || 0;
 
-        my @rawUrIds = sort $sortFn keys %$uniref;
+        my @rawUrIds = sort $clusterSortFn keys %$uniref;
         my %clusters;
         map { push @{$clusters{$clusterMap->{$_}}}, $_ if $clusterMap->{$_}; } @rawUrIds; 
 
@@ -338,17 +315,16 @@ sub saveUniRef {
         my %clusterNumIndexMap;
         my $uniRefIndex = 0;
 
-        print "START\n";
-
         foreach my $clusterNum (sort { $a <=> $b } keys %clusters) {
-            my @urIds = sort $sortFn @{$clusters{$clusterNum}};
+            my @unsortedIds = @{$clusters{$clusterNum}};
+            my @urIds = sort $idSortFn @unsortedIds;
             my $startUniRefIndex = $uniRefIndex;
             foreach my $unirefId (@urIds) {
                 my $unirefClusterIndex = $indexMap->{$unirefId};
-                print "SKIPPING UniRef${ver} cluster ID because it's not found in UniProt cluster list, due to not having any ENA data\n"
+                print "SKIPPING UniRef${ver} cluster ID $unirefId because it's not found in UniProt cluster list, due to not having any ENA data\n"
                     and next if not $unirefClusterIndex;
                 my @uniprotIds = @{$uniref->{$unirefId}};
-                @uniprotIds = sort $ur90SortFn @uniprotIds if $ur90SortFn;
+                @uniprotIds = sort $sortClustersBySizeUniRef90Fn @uniprotIds if $sortClustersBySizeUniRef90Fn;
                 my $delta = 0;
                 foreach my $uniprotId (@uniprotIds) {
                     my $clusterIndex = $indexMap->{$uniprotId};
@@ -390,9 +366,11 @@ sub saveUniRef {
        }
     };
    
-    &$insertUniRefFn($ur50SortFn, $ur50, "50", $ur90SortFn) if $self->{uniref_version} == 50;
+    &$insertUniRefFn($sortClustersBySizeUniRef50Fn, $idSortFn, $ur50, "50", $sortClustersBySizeUniRef90Fn) if $self->{uniref_version} == 50;
     print "Done with UniRef50\n";
-    &$insertUniRefFn($ur90SortFn, $ur90, "90") if $self->{uniref_version} >= 50;
+    # If the input dataset is UniRef90, then sort by the evalue in the BLAST results, otherwise sort by UniRef ID internal cluster size.
+    my $sortUniRef90 = $self->{uniref_version} == 90 ? $idSortFn : $sortClustersBySizeUniRef90Fn;
+    &$insertUniRefFn($sortClustersBySizeUniRef90Fn, $sortUniRef90, $ur90, "90") if $self->{uniref_version} >= 50;
     print "Done with UniRef90\n";
 }
 

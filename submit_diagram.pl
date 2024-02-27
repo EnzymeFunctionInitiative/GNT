@@ -260,7 +260,7 @@ sub outputCreateScript {
         my $revArg = $reverseUniRef ? "" : "--uniref-version $uv";
         $B->addAction("get_uniref_ids.pl --uniprot-ids $idFile --uniref-mapping $urIdMapFile $revArg");
         $extra .= " --uniref $uv";
-        $idFile = $urIdMapFile;
+        $extra .= " --uniref-map-file $urIdMapFile";
     }
     $B->addAction("create_diagram_db.pl --id-file $idFile $extra --db-file $outputFile --job-type $jobType $titleArg --nb-size $nbSize");
 }

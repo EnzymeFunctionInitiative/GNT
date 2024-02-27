@@ -328,6 +328,7 @@ if ($optMsaOption) {
     $fileInfo->{hmm_weblogo_colors} = \@colors;
     $optMinSeqMsa = ($optMinSeqMsa and $optMinSeqMsa >= 1) ? $optMinSeqMsa : 5;
     $fileInfo->{hmm_min_seq_msa} = $optMinSeqMsa;
+    $fileInfo->{hmm_max_seq_msa} = $optMaxSeqMsa if $optMaxSeqMsa;
 
     $fileInfo->{output_path} = $outputPath;
     $fileInfo->{cluster_size_file} = $clusterSizeFile;

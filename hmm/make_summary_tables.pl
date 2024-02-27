@@ -7,20 +7,22 @@ use Getopt::Long;
 use Data::Dumper;
 
 
-my ($posSummaryFile, $pctSummaryFile, @posFiles, @pctFiles, $numRowHeaders);
+my ($posSummaryFile, $pctSummaryFile, @posFiles, @pctFiles, $posMaster, $pctMaster, $numRowHeaders);
 my $result = GetOptions(
     "position-summary-file=s"   => \$posSummaryFile,
     "percentage-summary-file=s" => \$pctSummaryFile,
     "position-file=s"           => \@posFiles,
     "percentage-file=s"         => \@pctFiles,
+    "position-file-master=s"    => \$posMaster,
+    "percentage-file-master=s"  => \$pctMaster,
     "num-row-headers=i"         => \$numRowHeaders,
 );
 
 
 die "Need position-summary-file" if not $posSummaryFile;
 die "Need percentage-summary-file" if not $pctSummaryFile;
-die "Need position-files" if not scalar @posFiles;
-die "Need percentage-files" if not scalar @pctFiles;
+die "Need position-files" if ((not $posMaster or not -f $posMaster) and not scalar @posFiles);
+die "Need percentage-files" if ((not $pctMaster or not -f $pctMaster) and not scalar @pctFiles);
 
 
 $numRowHeaders = 4 if not $numRowHeaders;
@@ -32,6 +34,14 @@ my @posHeader;
 my @pctHeader;
 my %posMinVals;
 my %rowInfo;
+
+
+if ($posMaster and -f $posMaster) {
+    @posFiles = readMaster($posMaster);
+}
+if ($pctMaster and -f $pctMaster) {
+    @pctFiles = readMaster($pctMaster);
+}
 
 
 my $minCons = 100;
@@ -107,17 +117,19 @@ foreach my $num (@clusterNumbers) {
     $first = 0;
 
     my @info = @{$rowInfo{$num}};
+    my $numMaxPos = $info[0];
+    @info = @info[1 .. $#info];
 
     my @minPos = @{$posData{$num}->{$minCons}};
-    print $pctOut join("\t", $num, $minCons, @info, @minPos), "\n";
+    print $pctOut join("\t", $num, $minCons, $numMaxPos, @info, @minPos), "\n";
 
     my @consPct = sort { $b <=> $a } keys %{$posData{$num}};
     foreach my $pct (@consPct) {
         my $c = 0;
         my %pos = map { $_ => $c++ } @{$posData{$num}->{$pct}};
         my %pct = map { $_ => $pctData{$num}->{$pct}->[$pos{$_}] } @{$posData{$num}->{$pct}};
-        print $posOut join("\t", $num, $pct, @info);
-        print $pctOut join("\t", $num, $pct, @info);
+        print $posOut join("\t", $num, $pct, $c, @info);
+        print $pctOut join("\t", $num, $pct, $c, @info);
         foreach my $pos (@minPos) {
             print $posOut "\t" . (exists $pos{$pos} ? $pos : "");
             print $pctOut "\t" . (exists $pct{$pos} ? $pct{$pos} : "");
@@ -131,4 +143,17 @@ close $posOut;
 close $pctOut;
 
 
+
+
+sub readMaster {
+    my $file = shift;
+    open my $fh, "<", $file or die "Unable to read master $file: $!";
+    my @files;
+    while (<$fh>) {
+        chomp;
+        push @files, $_;
+    }
+    close $fh;
+    return @files;
+}
 
